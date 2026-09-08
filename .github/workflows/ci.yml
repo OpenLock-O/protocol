@@ -33,6 +33,9 @@ jobs:
         shell: bash
         run: nix profile add nixpkgs#devenv
 
+      - name: Fetch Rust dependencies
+        run: devenv shell -- sh -c 'CARGO_NET_OFFLINE=false cargo fetch'
+
       - name: Check formatting and lints
         run: devenv shell -- check
 
