@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/openlock-core",
+  "crates/openlock-ble",
+  "crates/openlock-issuer",
+  "crates/openlock-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-3.0-or-later"
+rust-version = "1.81"
+
+[workspace.dependencies]
+ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
+sha2 = { version = "0.10", default-features = false }
+ciborium = "0.2"
+snow = { version = "0.10", default-features = false, features = [
+  "default-resolver",
+  "default-resolver-crypto",
+  "std",
+] }
+x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
+thiserror = "1"
+rand_core = { version = "0.6", default-features = false }

@@ -1,13 +1,3 @@
-.DS_Store
-.devenv/
-.direnv/
-.build/
-.swiftpm/
-DerivedData/
-result
-result-*
-xcuserdata/
-*.xcuserstate
-.env
-.env.*
-!.env.example
+/target/
+/.devenv/
+/.direnv/

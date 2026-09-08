@@ -1,0 +1,10 @@
+[package]
+name = "openlock-issuer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openlock-core = { path = "../openlock-core" }
+ed25519-dalek.workspace = true

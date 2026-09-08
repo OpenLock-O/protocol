@@ -1,0 +1,17 @@
+[package]
+name = "openlock-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ed25519-dalek.workspace = true
+sha2.workspace = true
+ciborium.workspace = true
+snow.workspace = true
+x25519-dalek.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rand_core.workspace = true

@@ -1,46 +1,40 @@
-{ lib, pkgs, ... }:
+{ pkgs, ... }:
 
 {
   scripts.nixd.exec = ''devenv lsp'';
 
   packages = with pkgs; [
     git
-    glab
-    go-task
-    python3
-  ] ++ lib.optionals stdenv.isLinux [
-    awscli2
-    curl
-    docker-buildx
-    docker-client
-    docker-compose
-    jq
-    openssh
-  ] ++ lib.optionals stdenv.isDarwin [
-    cocoapods
-    xcodegen
+    pkg-config
+    rustc
+    cargo
+    rustfmt
+    clippy
   ];
 
-  apple.sdk = null;
+  languages.rust.enable = true;
+  languages.rust.channel = "stable";
+  languages.rust.components = [ "rustc" "cargo" "rustfmt" "clippy" ];
 
-  # Keep Xcode's complete Apple toolchain instead of Nix's generic drivers.
-  unsetEnvVars = lib.mkOptionDefault (
-    lib.optionals pkgs.stdenv.isDarwin [ "AR" "CC" "CXX" "LD" ]
-  );
+  env.OPENLOCK_OFFLINE = "1";
+  env.CARGO_NET_OFFLINE = "true";
 
-  enterTest = lib.optionalString pkgs.stdenv.isDarwin ''
-    test -z "''${AR-}"
-    test -z "''${CC-}"
-    test -z "''${CXX-}"
-    test -z "''${LD-}"
-    test -x "$(/usr/bin/xcrun --find clang)"
-    test -x "$(/usr/bin/xcrun --find ld)"
+  scripts.check.exec = ''
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets -- -D warnings
   '';
 
-  languages.javascript = {
-    enable = true;
-    package = pkgs.nodejs-slim_24;
-    corepack.enable = true;
-    npm.enable = true;
-  };
+  scripts.unit-tests.exec = ''
+    cargo test --workspace
+  '';
+
+  scripts.build.exec = ''
+    cargo build --workspace --all-targets
+  '';
+
+  enterShell = ''
+    export RUST_BACKTRACE=1
+    echo "OpenLock development environment"
+    rustc --version
+  '';
 }
