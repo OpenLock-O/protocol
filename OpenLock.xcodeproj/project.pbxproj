@@ -1,0 +1,708 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		05A43666183607C141ED6546 /* DoorViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94E5D2C2248A873EE2C40D5 /* DoorViews.swift */; };
+		111355FF6BE545501818AD40 /* OpenLockWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F563D91024833D63D0F4C34F /* OpenLockWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		263F351B435C9B4B79AF0319 /* DoorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 556BC952877E6D35BE9347DD /* DoorStore.swift */; };
+		2B1F883330E1D59B136A90D7 /* DoorRecommendation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5755A12FB5871BDF578C00B1 /* DoorRecommendation.swift */; };
+		326DD094C4449A183B029B4D /* DoorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 556BC952877E6D35BE9347DD /* DoorStore.swift */; };
+		33DC8FEAA4CD8143BE908079 /* OpenLockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25331D6CF91B194F48FD4014 /* OpenLockApp.swift */; };
+		3B95C2B5DCBB2E5A027E8864 /* OpenLockWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E69153DB05D9E3FFCD4CFE27 /* OpenLockWatchApp.swift */; };
+		469E6EFE9DF8817391FA28D7 /* DoorAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26BD9BF08B7F42DB6748CC5A /* DoorAppearanceViews.swift */; };
+		4967865F11A32890641F71C6 /* UnlockActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D371A78BBBB562E5B0F9CEA1 /* UnlockActivityAttributes.swift */; };
+		641E17C9AEF149F05B0C04FF /* UnlockActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF2BE7BC20B7071E0AC56D9A /* UnlockActivityManager.swift */; };
+		710F99B76100192959DCB58A /* OpenLockWatch.app in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = B0C3AFE0BF24835807064291 /* OpenLockWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		84386A6C4F1189564DB55702 /* BluetoothController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C2835C3044CACC6CCD7EA54 /* BluetoothController.swift */; };
+		84586C52665C1D77C96EBA87 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC5D8B7687B6BA66510BD300 /* CredentialStore.swift */; };
+		8BC00F0CA849CBDD3FFB01E2 /* OpenLockWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04E23C186DB4DD6A7C625C9F /* OpenLockWidgets.swift */; };
+		8E4444DC8F2113F0E243AB07 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC5D8B7687B6BA66510BD300 /* CredentialStore.swift */; };
+		9101BE8E38AE2591BE366C37 /* UnlockActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D371A78BBBB562E5B0F9CEA1 /* UnlockActivityAttributes.swift */; };
+		9209326E8F0F37FD4ABE7535 /* YiLaProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D52B5C2FDDADC25B4EE2606 /* YiLaProtocol.swift */; };
+		96060280BEAB385C89E957E3 /* DoorRecommendation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5755A12FB5871BDF578C00B1 /* DoorRecommendation.swift */; };
+		A8970CAB151A16F9F13B2E37 /* YiLaProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D52B5C2FDDADC25B4EE2606 /* YiLaProtocol.swift */; };
+		AFD373B864308A42D8D3935E /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E915ECF84F7A6D9AA258EF1B /* Models.swift */; };
+		C34D68E98D632E6D89337958 /* BluetoothController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C2835C3044CACC6CCD7EA54 /* BluetoothController.swift */; };
+		CD89280B23904710DF393F69 /* DoorLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401136DF0C496073E5B9EC1B /* DoorLocationManager.swift */; };
+		D07E39391F93FC754B535783 /* DoorAppearanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26BD9BF08B7F42DB6748CC5A /* DoorAppearanceViews.swift */; };
+		EDB14AB33DDF41985ED164A7 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E915ECF84F7A6D9AA258EF1B /* Models.swift */; };
+		F440F7C223C0C06B704C33D5 /* DoorViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94E5D2C2248A873EE2C40D5 /* DoorViews.swift */; };
+		F767A3EC11D3ADBFD3663381 /* DoorLocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401136DF0C496073E5B9EC1B /* DoorLocationManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8047ECFE3BA98EA827A2439F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83612E8ED7B6A4DC93E06F8D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 840E88B2D78C937E6CD48998;
+			remoteInfo = OpenLockWatch;
+		};
+		FCC9E216A5522FF9ED640FED /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83612E8ED7B6A4DC93E06F8D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 99EA8CFF4E35AEA52D833658;
+			remoteInfo = OpenLockWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		58E472057EF2016DE72D365B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				111355FF6BE545501818AD40 /* OpenLockWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECC5FF2EA23CEF790E13157F /* Embed Dependencies */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				710F99B76100192959DCB58A /* OpenLockWatch.app in Embed Dependencies */,
+			);
+			name = "Embed Dependencies";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		04E23C186DB4DD6A7C625C9F /* OpenLockWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenLockWidgets.swift; sourceTree = "<group>"; };
+		25331D6CF91B194F48FD4014 /* OpenLockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenLockApp.swift; sourceTree = "<group>"; };
+		26BD9BF08B7F42DB6748CC5A /* DoorAppearanceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorAppearanceViews.swift; sourceTree = "<group>"; };
+		35A9570614B33050C9123733 /* OpenLock.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenLock.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3D52B5C2FDDADC25B4EE2606 /* YiLaProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YiLaProtocol.swift; sourceTree = "<group>"; };
+		401136DF0C496073E5B9EC1B /* DoorLocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorLocationManager.swift; sourceTree = "<group>"; };
+		556BC952877E6D35BE9347DD /* DoorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorStore.swift; sourceTree = "<group>"; };
+		5755A12FB5871BDF578C00B1 /* DoorRecommendation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorRecommendation.swift; sourceTree = "<group>"; };
+		7C2835C3044CACC6CCD7EA54 /* BluetoothController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BluetoothController.swift; sourceTree = "<group>"; };
+		AC5D8B7687B6BA66510BD300 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		AF2BE7BC20B7071E0AC56D9A /* UnlockActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockActivityManager.swift; sourceTree = "<group>"; };
+		B0C3AFE0BF24835807064291 /* OpenLockWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenLockWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D371A78BBBB562E5B0F9CEA1 /* UnlockActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockActivityAttributes.swift; sourceTree = "<group>"; };
+		E69153DB05D9E3FFCD4CFE27 /* OpenLockWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenLockWatchApp.swift; sourceTree = "<group>"; };
+		E915ECF84F7A6D9AA258EF1B /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		F563D91024833D63D0F4C34F /* OpenLockWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = OpenLockWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F94E5D2C2248A873EE2C40D5 /* DoorViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorViews.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		30BD1FBC870D7E1ACFE36F7E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				35A9570614B33050C9123733 /* OpenLock.app */,
+				B0C3AFE0BF24835807064291 /* OpenLockWatch.app */,
+				F563D91024833D63D0F4C34F /* OpenLockWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		34F5DC5FCEBB4AE554AA1CBC /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				04E23C186DB4DD6A7C625C9F /* OpenLockWidgets.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		54B10D14A6117480CFAB8F5A /* ActivityShared */ = {
+			isa = PBXGroup;
+			children = (
+				D371A78BBBB562E5B0F9CEA1 /* UnlockActivityAttributes.swift */,
+			);
+			path = ActivityShared;
+			sourceTree = "<group>";
+		};
+		6C09A1939D5DD50044F286EA /* App */ = {
+			isa = PBXGroup;
+			children = (
+				25331D6CF91B194F48FD4014 /* OpenLockApp.swift */,
+				AF2BE7BC20B7071E0AC56D9A /* UnlockActivityManager.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		7C882EF9EA41FE237D00C3F4 /* WatchApp */ = {
+			isa = PBXGroup;
+			children = (
+				E69153DB05D9E3FFCD4CFE27 /* OpenLockWatchApp.swift */,
+			);
+			path = WatchApp;
+			sourceTree = "<group>";
+		};
+		C150222C10EB28ABE09EA937 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				7C2835C3044CACC6CCD7EA54 /* BluetoothController.swift */,
+				AC5D8B7687B6BA66510BD300 /* CredentialStore.swift */,
+				26BD9BF08B7F42DB6748CC5A /* DoorAppearanceViews.swift */,
+				401136DF0C496073E5B9EC1B /* DoorLocationManager.swift */,
+				5755A12FB5871BDF578C00B1 /* DoorRecommendation.swift */,
+				556BC952877E6D35BE9347DD /* DoorStore.swift */,
+				F94E5D2C2248A873EE2C40D5 /* DoorViews.swift */,
+				E915ECF84F7A6D9AA258EF1B /* Models.swift */,
+				3D52B5C2FDDADC25B4EE2606 /* YiLaProtocol.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F97DC6D474B3598789185B68 = {
+			isa = PBXGroup;
+			children = (
+				54B10D14A6117480CFAB8F5A /* ActivityShared */,
+				6C09A1939D5DD50044F286EA /* App */,
+				C150222C10EB28ABE09EA937 /* Shared */,
+				7C882EF9EA41FE237D00C3F4 /* WatchApp */,
+				34F5DC5FCEBB4AE554AA1CBC /* Widgets */,
+				30BD1FBC870D7E1ACFE36F7E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		840E88B2D78C937E6CD48998 /* OpenLockWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 89F96C64B5E0F90ADB9BC7E3 /* Build configuration list for PBXNativeTarget "OpenLockWatch" */;
+			buildPhases = (
+				FC440A69416C145045635000 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenLockWatch;
+			packageProductDependencies = (
+			);
+			productName = OpenLockWatch;
+			productReference = B0C3AFE0BF24835807064291 /* OpenLockWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		97B08D3D21A4C18C8E04C4B0 /* OpenLock */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6964F82EDE8F62D3D4AC1CAE /* Build configuration list for PBXNativeTarget "OpenLock" */;
+			buildPhases = (
+				A50691F885391F28080CDDC8 /* Sources */,
+				58E472057EF2016DE72D365B /* Embed Foundation Extensions */,
+				ECC5FF2EA23CEF790E13157F /* Embed Dependencies */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				43B1BB3284FE15C94CA5C3B2 /* PBXTargetDependency */,
+				D97CA385E0A4ADDE2C0B03C3 /* PBXTargetDependency */,
+			);
+			name = OpenLock;
+			packageProductDependencies = (
+			);
+			productName = OpenLock;
+			productReference = 35A9570614B33050C9123733 /* OpenLock.app */;
+			productType = "com.apple.product-type.application";
+		};
+		99EA8CFF4E35AEA52D833658 /* OpenLockWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9116151584C07463E44F3995 /* Build configuration list for PBXNativeTarget "OpenLockWidgets" */;
+			buildPhases = (
+				F040894B0B37BE986F26B93B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenLockWidgets;
+			packageProductDependencies = (
+			);
+			productName = OpenLockWidgets;
+			productReference = F563D91024833D63D0F4C34F /* OpenLockWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		83612E8ED7B6A4DC93E06F8D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					840E88B2D78C937E6CD48998 = {
+						ProvisioningStyle = Automatic;
+					};
+					97B08D3D21A4C18C8E04C4B0 = {
+						ProvisioningStyle = Automatic;
+					};
+					99EA8CFF4E35AEA52D833658 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = C5718CC549FA286E1C453F55 /* Build configuration list for PBXProject "OpenLock" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = F97DC6D474B3598789185B68;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				97B08D3D21A4C18C8E04C4B0 /* OpenLock */,
+				840E88B2D78C937E6CD48998 /* OpenLockWatch */,
+				99EA8CFF4E35AEA52D833658 /* OpenLockWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A50691F885391F28080CDDC8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				84386A6C4F1189564DB55702 /* BluetoothController.swift in Sources */,
+				84586C52665C1D77C96EBA87 /* CredentialStore.swift in Sources */,
+				469E6EFE9DF8817391FA28D7 /* DoorAppearanceViews.swift in Sources */,
+				F767A3EC11D3ADBFD3663381 /* DoorLocationManager.swift in Sources */,
+				2B1F883330E1D59B136A90D7 /* DoorRecommendation.swift in Sources */,
+				263F351B435C9B4B79AF0319 /* DoorStore.swift in Sources */,
+				F440F7C223C0C06B704C33D5 /* DoorViews.swift in Sources */,
+				AFD373B864308A42D8D3935E /* Models.swift in Sources */,
+				33DC8FEAA4CD8143BE908079 /* OpenLockApp.swift in Sources */,
+				9101BE8E38AE2591BE366C37 /* UnlockActivityAttributes.swift in Sources */,
+				641E17C9AEF149F05B0C04FF /* UnlockActivityManager.swift in Sources */,
+				A8970CAB151A16F9F13B2E37 /* YiLaProtocol.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F040894B0B37BE986F26B93B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8BC00F0CA849CBDD3FFB01E2 /* OpenLockWidgets.swift in Sources */,
+				4967865F11A32890641F71C6 /* UnlockActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FC440A69416C145045635000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C34D68E98D632E6D89337958 /* BluetoothController.swift in Sources */,
+				8E4444DC8F2113F0E243AB07 /* CredentialStore.swift in Sources */,
+				D07E39391F93FC754B535783 /* DoorAppearanceViews.swift in Sources */,
+				CD89280B23904710DF393F69 /* DoorLocationManager.swift in Sources */,
+				96060280BEAB385C89E957E3 /* DoorRecommendation.swift in Sources */,
+				326DD094C4449A183B029B4D /* DoorStore.swift in Sources */,
+				05A43666183607C141ED6546 /* DoorViews.swift in Sources */,
+				EDB14AB33DDF41985ED164A7 /* Models.swift in Sources */,
+				3B95C2B5DCBB2E5A027E8864 /* OpenLockWatchApp.swift in Sources */,
+				9209326E8F0F37FD4ABE7535 /* YiLaProtocol.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		43B1BB3284FE15C94CA5C3B2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 99EA8CFF4E35AEA52D833658 /* OpenLockWidgets */;
+			targetProxy = FCC9E216A5522FF9ED640FED /* PBXContainerItemProxy */;
+		};
+		D97CA385E0A4ADDE2C0B03C3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 840E88B2D78C937E6CD48998 /* OpenLockWatch */;
+			targetProxy = 8047ECFE3BA98EA827A2439F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0019A5E93E878F488B166152 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = "Config/watchOS-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Debug;
+		};
+		3EA2D0BE45D8313DE9B1DAF4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = "Config/watchOS-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Release;
+		};
+		4B460ADFFFF73B2390033E69 /* Simulator */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Simulator;
+		};
+		5A37C7EF139B7386E80D2FAA /* Simulator */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = "Config/iOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app;
+				SDKROOT = iphonesimulator;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Simulator;
+		};
+		96A3147F43029C440F158DE4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = "Config/iOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A29BCA0C3AB78B0A803B6D87 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = "Config/Widgets-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A8CECE2DC37FF208B4593F8A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		BB157596290D5DF36EA5EEC4 /* Simulator */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = "Config/Widgets-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app.widgets;
+				SDKROOT = iphonesimulator;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Simulator;
+		};
+		CAC4D372193ED62FFDF12386 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = "Config/iOS-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		E7D0E967631CA89CBDB89D9C /* Simulator */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = "Config/watchOS-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app.watchkitapp;
+				SDKROOT = watchsimulator;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Simulator;
+		};
+		EF6A29A6B9B55D68083615E7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = "Config/Widgets-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.openlock.app.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F765E09610A49E6D056C38E8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		6964F82EDE8F62D3D4AC1CAE /* Build configuration list for PBXNativeTarget "OpenLock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CAC4D372193ED62FFDF12386 /* Debug */,
+				96A3147F43029C440F158DE4 /* Release */,
+				5A37C7EF139B7386E80D2FAA /* Simulator */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		89F96C64B5E0F90ADB9BC7E3 /* Build configuration list for PBXNativeTarget "OpenLockWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0019A5E93E878F488B166152 /* Debug */,
+				3EA2D0BE45D8313DE9B1DAF4 /* Release */,
+				E7D0E967631CA89CBDB89D9C /* Simulator */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9116151584C07463E44F3995 /* Build configuration list for PBXNativeTarget "OpenLockWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EF6A29A6B9B55D68083615E7 /* Debug */,
+				A29BCA0C3AB78B0A803B6D87 /* Release */,
+				BB157596290D5DF36EA5EEC4 /* Simulator */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C5718CC549FA286E1C453F55 /* Build configuration list for PBXProject "OpenLock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A8CECE2DC37FF208B4593F8A /* Debug */,
+				F765E09610A49E6D056C38E8 /* Release */,
+				4B460ADFFFF73B2390033E69 /* Simulator */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 83612E8ED7B6A4DC93E06F8D /* Project object */;
+}
