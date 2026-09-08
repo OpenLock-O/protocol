@@ -340,38 +340,84 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
-name = "openlock-ble"
-version = "0.1.0"
+name = "openlock-core"
+version = "0.2.0"
 dependencies = [
+ "ed25519-dalek",
+ "openlock-crypto",
+ "openlock-types",
+ "rand_core",
  "thiserror",
 ]
 
 [[package]]
-name = "openlock-core"
-version = "0.1.0"
+name = "openlock-crypto"
+version = "0.2.0"
 dependencies = [
  "ciborium",
  "ed25519-dalek",
- "rand_core",
+ "openlock-types",
  "sha2",
  "snow",
- "thiserror",
  "x25519-dalek",
 ]
 
 [[package]]
 name = "openlock-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "openlock-core",
+ "openlock-protocol",
+ "openlock-types",
 ]
 
 [[package]]
 name = "openlock-issuer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ed25519-dalek",
  "openlock-core",
+ "openlock-crypto",
+ "openlock-types",
+]
+
+[[package]]
+name = "openlock-protocol"
+version = "0.2.0"
+dependencies = [
+ "openlock-crypto",
+ "openlock-types",
+]
+
+[[package]]
+name = "openlock-transport"
+version = "0.2.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "openlock-transport-ble"
+version = "0.2.0"
+dependencies = [
+ "openlock-transport",
+]
+
+[[package]]
+name = "openlock-transport-nfc"
+version = "0.2.0"
+dependencies = [
+ "ed25519-dalek",
+ "openlock-crypto",
+ "openlock-transport",
+ "openlock-types",
+]
+
+[[package]]
+name = "openlock-types"
+version = "0.2.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]

@@ -1,34 +1,52 @@
-# OpenLock protocol v1
+# OpenLock protocol v2
 
-OpenLock treats BLE GATT as a byte transport. A server exposes one custom
-128-bit service with three characteristics:
+OpenLock treats BLE GATT and NFC ISO-DEP as byte transports. The protocol
+state machine is shared by both; only the frame codec changes. A complete
+packet is a definite CBOR array:
 
-| Characteristic | GATT operation | Purpose |
-| --- | --- | --- |
-| RX | Write With Response | client-to-lock frames |
-| TX | Indicate | lock-to-client frames and acknowledgements |
-| Metadata | Read | protocol version and framing limits only |
+```text
+[version, profile, kind, request_id, capabilities, payload]
+```
 
-RX and TX values use `openlock-ble::FragmentHeader`. A message is identified by
-`message_id`, carries a total length, and may arrive out of order. A second
-message cannot evict an incomplete one. The application must expire a partial
-message and start a new session instead.
+`version` is `2`, `profile` is `1`, and `kind` is handshake, request, or
+response. Handshake payloads are Noise IK messages. Once the handshake is
+complete, request and response payloads are encrypted Noise transport messages.
+Unknown versions, profiles, kinds, malformed CBOR and packets over 4096 bytes
+are rejected.
 
-## Session sequence
+## Session
 
-1. The client starts `Noise_IK_25519_ChaChaPoly_SHA256` with its static
-   X25519 key and the provisioned lock public key.
-2. The lock completes the handshake and checks that the authenticated static
-   key equals the key in the signed grant.
-3. The client sends a signed grant and an `Unlock` or `Status` request inside
-   the Noise transport state. The lock verifies the COSE-Sign1 object before
-   evaluating policy.
-4. For counted grants, the lock commits the increment through
-   `PersistentState::commit` before emitting the actuator event. A repeated
-   consumption sequence returns `AlreadyConsumed` and never emits a second
-   event.
+The initiator is configured with its static X25519 private key and the trusted
+lock public key. The responder is configured with its static private key. Both
+use `Noise_IK_25519_ChaChaPoly_SHA256` and the v2 prologue. The responder's
+authenticated static key is exposed to authorization as `SubjectKey`.
 
-COSE protected headers contain EdDSA. The OpenLock object kind (`grant` or
-`policy`) is used as the COSE external authenticated data, preventing a valid
-signature for one object type from being interpreted as another. The payload
-is a fixed CBOR array so every implementation can produce identical bytes.
+```text
+initiator -> responder: Noise IK message 1
+responder -> initiator: Noise IK message 2
+initiator -> responder: encrypted Request
+responder -> initiator: encrypted Response
+```
+
+The application must keep each `Session` state for one direction's nonce
+sequence and must discard it after an authentication error or timeout.
+
+## NFC bootstrap
+
+A passive NDEF tag may carry a signed CBOR record with the lock ID, key ID,
+monotonic key version, X25519 public key, independent Ed25519 rotation key,
+capabilities and issuer signature. The application verifies the record against
+its configured issuer root before pinning it locally. No display or online CA
+is required. A direct-pinning trust store is also supported for installations
+that provision the public key through a factory or QR workflow.
+
+Full NFC sessions use ISO-DEP/APDU chunks with a sequence byte and total length.
+Platform code provides reader/card-emulation callbacks; this crate only validates
+and reassembles chunks.
+
+## Authorization
+
+The lock verifies the signed grant before checking lock ID, epoch, rights,
+revocation, time and the Noise peer key. Counted grants commit their increment
+through `PersistentState::commit` before actuator invocation. A stale use
+sequence returns `AlreadyConsumed` and cannot emit a second actuator event.

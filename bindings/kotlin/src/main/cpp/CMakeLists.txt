@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(openlock_jni C)
+add_library(openlock_jni SHARED openlock_jni.c)
+target_include_directories(openlock_jni PRIVATE ../../../../include)
+target_link_libraries(openlock_jni openlock_ffi)

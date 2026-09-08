@@ -10,7 +10,24 @@
     cargo
     rustfmt
     clippy
+    kotlin
+    gradle
+    jdk17
+    cmake
+    ninja
+    swiftPackages.swift
+    swiftPackages.swiftpm
   ];
+
+  android = {
+    enable = true;
+    platforms.version = [ "35" ];
+    buildTools.version = [ "35.0.0" ];
+    cmake.version = [ "3.22.1" ];
+    ndk.enable = true;
+    sources.enable = false;
+    systemImages.enable = false;
+  };
 
   languages.rust.enable = true;
   languages.rust.channel = "stable";

@@ -2,18 +2,30 @@
 resolver = "2"
 members = [
   "crates/openlock-core",
-  "crates/openlock-ble",
+  "crates/openlock-types",
+  "crates/openlock-crypto",
+  "crates/openlock-protocol",
+  "crates/openlock-transport",
+  "crates/openlock-transport-ble",
+  "crates/openlock-transport-nfc",
   "crates/openlock-issuer",
   "crates/openlock-ffi",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "LGPL-3.0-or-later"
 rust-version = "1.81"
 
 [workspace.dependencies]
+openlock-types = { path = "crates/openlock-types" }
+openlock-crypto = { path = "crates/openlock-crypto" }
+openlock-core = { path = "crates/openlock-core" }
+openlock-protocol = { path = "crates/openlock-protocol" }
+openlock-transport = { path = "crates/openlock-transport" }
+openlock-transport-ble = { path = "crates/openlock-transport-ble" }
+openlock-transport-nfc = { path = "crates/openlock-transport-nfc" }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
 sha2 = { version = "0.10", default-features = false }
 ciborium = "0.2"

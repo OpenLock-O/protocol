@@ -1,0 +1,4 @@
+module OpenLockFFI {
+    header "openlock.h"
+    export *
+}

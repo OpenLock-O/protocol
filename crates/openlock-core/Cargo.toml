@@ -6,11 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+openlock-types.workspace = true
+openlock-crypto.workspace = true
 ed25519-dalek.workspace = true
-sha2.workspace = true
-ciborium.workspace = true
-snow.workspace = true
-x25519-dalek.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

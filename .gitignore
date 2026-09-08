@@ -1,3 +1,9 @@
 /target/
 /.devenv/
 /.direnv/
+/bindings/swift/.build/
+/bindings/swift/.swiftpm/
+/bindings/kotlin/.gradle/
+/bindings/kotlin/build/
+/bindings/kotlin/.kotlin/
+/local.properties

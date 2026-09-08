@@ -4,6 +4,8 @@ use ed25519_dalek::SigningKey;
 use openlock_core::{
     sign_grant, sign_policy, CredentialId, Grant, LockId, PolicyUpdate, SubjectKey,
 };
+use openlock_crypto::{sign_device_key, sign_key_update};
+use openlock_types::{DeviceKey, DeviceKeyRecord, KeyUpdate};
 use std::collections::BTreeSet;
 
 pub struct Issuer {
@@ -61,5 +63,17 @@ impl Issuer {
             revoked,
         };
         Ok((update.clone(), sign_policy(&self.key, &update)?))
+    }
+
+    pub fn issue_device_key(
+        &self,
+        key: DeviceKey,
+        issuer_key_id: u32,
+    ) -> Result<DeviceKeyRecord, openlock_core::Error> {
+        sign_device_key(&self.key, &key, issuer_key_id)
+    }
+
+    pub fn rotate_device_key(&self, update: KeyUpdate) -> Result<KeyUpdate, openlock_core::Error> {
+        sign_key_update(&self.key, update)
     }
 }

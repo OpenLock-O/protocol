@@ -1,11 +1,10 @@
 [package]
-name = "openlock-ble"
+name = "openlock-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-thiserror.workspace = true
-
-[dev-dependencies]
+openlock-types.workspace = true
+openlock-crypto.workspace = true

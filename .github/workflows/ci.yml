@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Enable Devenv cache
+        uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install Devenv
+        shell: bash
+        run: nix profile add nixpkgs#devenv
+
+      - name: Check formatting and lints
+        run: devenv shell -- check
+
+      - name: Run tests
+        run: devenv shell -- unit-tests
+
+      - name: Build workspace
+        run: devenv shell -- build
+
+  bindings:
+    name: Swift, Kotlin and JNI bindings
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Enable Devenv cache
+        uses: cachix/cachix-action@v16
+        with:
+          name: devenv
+
+      - name: Install Devenv
+        shell: bash
+        run: nix profile add nixpkgs#devenv
+
+      - name: Build Swift package
+        shell: devenv shell bash -- -e {0}
+        run: cd bindings/swift && swift build
+
+      - name: Build Kotlin package
+        shell: devenv shell bash -- -e {0}
+        run: cd bindings/kotlin && gradle --no-daemon --console=plain build
+
+      - name: Check JNI shim
+        shell: devenv shell bash -- -e {0}
+        run: |
+          ndk_root="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
+          jni_include="$(dirname "$(find -L "$ndk_root" -name jni.h -print -quit)")"
+          clang -fsyntax-only -I"$jni_include" -Iinclude bindings/kotlin/src/main/cpp/openlock_jni.c
