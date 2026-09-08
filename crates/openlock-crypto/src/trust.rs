@@ -1,8 +1,11 @@
 use crate::cbor::*;
 use crate::cose::{sign_object, verify_object};
+use crate::validate_public;
 use crate::VerifyingKey;
 use ed25519_dalek::SigningKey;
-use openlock_types::{ClockSample, DeviceKey, DeviceKeyRecord, Error, KeyUpdate, LockId};
+use openlock_types::{
+    ClockSample, DeviceKey, DeviceKeyRecord, Error, KeyUpdate, LockId, KNOWN_CAPABILITIES,
+};
 use std::collections::BTreeMap;
 
 const DEVICE: &[u8] = b"openlock:v2:device-key";
@@ -25,6 +28,7 @@ pub fn sign_device_key(
     key: &DeviceKey,
     issuer_key_id: u32,
 ) -> Result<DeviceKeyRecord, Error> {
+    validate_device_key(key)?;
     Ok(DeviceKeyRecord {
         key: key.clone(),
         issuer_key_id,
@@ -32,6 +36,7 @@ pub fn sign_device_key(
     })
 }
 pub fn verify_device_key(issuer: &VerifyingKey, record: &DeviceKeyRecord) -> Result<(), Error> {
+    validate_device_key(&record.key)?;
     let value = verify_object(issuer, DEVICE, &record.signature)?;
     let f = fields(&value, 8)?;
     if number(&f[0])? != 2
@@ -47,6 +52,21 @@ pub fn verify_device_key(issuer: &VerifyingKey, record: &DeviceKeyRecord) -> Res
     }
     Ok(())
 }
+
+/// Validate device-key invariants independent of the issuer signature.
+pub fn validate_device_key(key: &DeviceKey) -> Result<(), Error> {
+    if key.key_version == 0
+        || key.x25519_public_key == [0; 32]
+        || key.rotation_public_key == [0; 32]
+        || key.capabilities == 0
+        || key.capabilities & !KNOWN_CAPABILITIES != 0
+    {
+        return Err(Error::InvalidPayload);
+    }
+    validate_public(&key.x25519_public_key).map_err(|_| Error::UntrustedKey)?;
+    VerifyingKey::from_bytes(&key.rotation_public_key).map_err(|_| Error::UntrustedKey)?;
+    Ok(())
+}
 pub fn key_update_value(update: &KeyUpdate) -> Value {
     array(vec![
         uint(2),
@@ -60,6 +80,7 @@ pub fn key_update_value(update: &KeyUpdate) -> Value {
     ])
 }
 pub fn sign_key_update(issuer: &SigningKey, mut update: KeyUpdate) -> Result<KeyUpdate, Error> {
+    validate_key_update(&update)?;
     update.signature = sign_object(issuer, UPDATE, &key_update_value(&update))?;
     Ok(update)
 }
@@ -67,8 +88,17 @@ pub fn sign_key_update_with_key(
     key: &SigningKey,
     mut update: KeyUpdate,
 ) -> Result<KeyUpdate, Error> {
+    validate_key_update(&update)?;
     update.signature = sign_object(key, UPDATE, &key_update_value(&update))?;
     Ok(update)
+}
+
+fn validate_key_update(update: &KeyUpdate) -> Result<(), Error> {
+    validate_device_key(&update.new_record.key)?;
+    if update.not_before >= update.retire_after {
+        return Err(Error::InvalidPayload);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -114,9 +144,7 @@ impl<S: TrustStorage> TrustStore<S> {
         Ok(())
     }
     pub fn pin(&mut self, key: DeviceKey) -> Result<(), Error> {
-        if key.x25519_public_key == [0; 32] || key.rotation_public_key == [0; 32] {
-            return Err(Error::UntrustedKey);
-        }
+        validate_device_key(&key)?;
         if let Some(old) = self.snapshot.devices.get(&key.device_id) {
             if old.key.key_id != key.key_id || key.key_version <= old.key.key_version {
                 return Err(Error::StaleKey);

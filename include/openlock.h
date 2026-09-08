@@ -36,6 +36,16 @@ int32_t openlock_session_send_unlock(openlock_session_t *session,
                                      int64_t requested_use,
                                      uint32_t *request_id, uint8_t *out,
                                      size_t capacity, size_t *out_len);
+int32_t openlock_session_send_status(openlock_session_t *session,
+                                     const uint8_t *credential,
+                                     size_t credential_len,
+                                     int64_t requested_use,
+                                     uint32_t *request_id, uint8_t *out,
+                                     size_t capacity, size_t *out_len);
+int32_t openlock_session_send_policy(openlock_session_t *session,
+                                     const uint8_t *policy, size_t policy_len,
+                                     uint32_t *request_id, uint8_t *out,
+                                     size_t capacity, size_t *out_len);
 void openlock_session_free(openlock_session_t *session);
 
 #endif

@@ -49,6 +49,17 @@ unsafe fn copy_out(bytes: &[u8], out: *mut u8, capacity: usize, out_len: *mut us
     0
 }
 
+unsafe fn check_output(out: *mut u8, capacity: usize, out_len: *mut usize, required: usize) -> i32 {
+    if out_len.is_null() || (capacity > 0 && out.is_null()) {
+        return -1;
+    }
+    if capacity < required {
+        *out_len = required;
+        return -2;
+    }
+    0
+}
+
 #[no_mangle]
 /// # Safety
 /// `private_key` and `lock_public` point to 32 readable bytes and `out` is writable.
@@ -107,6 +118,10 @@ pub unsafe extern "C" fn openlock_session_start(
     if session.is_null() {
         return -1;
     }
+    let output_code = check_output(out, capacity, out_len, 0);
+    if output_code != 0 {
+        return output_code;
+    }
     match (*session).inner.start() {
         Ok(bytes) => copy_out(&bytes, out, capacity, out_len),
         Err(error) => error.code() as i32,
@@ -127,6 +142,10 @@ pub unsafe extern "C" fn openlock_session_receive(
 ) -> i32 {
     if session.is_null() || (input_len > 0 && input.is_null()) || event.is_null() {
         return -1;
+    }
+    let output_code = check_output(out, capacity, out_len, 0);
+    if output_code != 0 {
+        return output_code;
     }
     let input = if input_len == 0 {
         &[]
@@ -179,6 +198,101 @@ pub unsafe extern "C" fn openlock_session_send_unlock(
         credential: credential.to_vec(),
         requested_use,
     });
+    let required = match (*session).inner.request_size(&command) {
+        Ok(size) => size,
+        Err(error) => return error.code() as i32,
+    };
+    let output_code = check_output(out, capacity, out_len, required);
+    if output_code != 0 {
+        return output_code;
+    }
+    match (*session).inner.send(command) {
+        Ok((id, bytes)) => {
+            *request_id = id;
+            copy_out(&bytes, out, capacity, out_len)
+        }
+        Err(error) => error.code() as i32,
+    }
+}
+
+#[no_mangle]
+/// # Safety
+/// `session` is live, `credential` contains `credential_len` readable bytes, and output pointers are valid.
+pub unsafe extern "C" fn openlock_session_send_status(
+    session: *mut OpenLockSession,
+    credential: *const u8,
+    credential_len: usize,
+    requested_use: i64,
+    request_id: *mut u32,
+    out: *mut u8,
+    capacity: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if session.is_null() || (credential_len > 0 && credential.is_null()) || request_id.is_null() {
+        return -1;
+    }
+    let requested_use = if requested_use < -1 || requested_use > u32::MAX as i64 {
+        return -1;
+    } else if requested_use == -1 {
+        None
+    } else {
+        Some(requested_use as u32)
+    };
+    let credential = if credential_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(credential, credential_len)
+    };
+    let command = Command::Status(AccessRequest {
+        credential: credential.to_vec(),
+        requested_use,
+    });
+    let required = match (*session).inner.request_size(&command) {
+        Ok(size) => size,
+        Err(error) => return error.code() as i32,
+    };
+    let output_code = check_output(out, capacity, out_len, required);
+    if output_code != 0 {
+        return output_code;
+    }
+    match (*session).inner.send(command) {
+        Ok((id, bytes)) => {
+            *request_id = id;
+            copy_out(&bytes, out, capacity, out_len)
+        }
+        Err(error) => error.code() as i32,
+    }
+}
+
+#[no_mangle]
+/// # Safety
+/// `session` is live, `policy` contains `policy_len` readable bytes, and output pointers are valid.
+pub unsafe extern "C" fn openlock_session_send_policy(
+    session: *mut OpenLockSession,
+    policy: *const u8,
+    policy_len: usize,
+    request_id: *mut u32,
+    out: *mut u8,
+    capacity: usize,
+    out_len: *mut usize,
+) -> i32 {
+    if session.is_null() || (policy_len > 0 && policy.is_null()) || request_id.is_null() {
+        return -1;
+    }
+    let policy = if policy_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(policy, policy_len)
+    };
+    let command = Command::ApplyPolicy(policy.to_vec());
+    let required = match (*session).inner.request_size(&command) {
+        Ok(size) => size,
+        Err(error) => return error.code() as i32,
+    };
+    let output_code = check_output(out, capacity, out_len, required);
+    if output_code != 0 {
+        return output_code;
+    }
     match (*session).inner.send(command) {
         Ok((id, bytes)) => {
             *request_id = id;

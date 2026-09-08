@@ -122,11 +122,12 @@ impl FrameCodec for IsoDepCodec {
         if self.expected_sequence != Some(fragment[0]) {
             return Err(TransportError::Conflict);
         }
-        self.expected_sequence = self.expected_sequence.map(|n| n.wrapping_add(1));
-        self.inner.extend_from_slice(&fragment[3..]);
-        if self.inner.len() > total {
+        let payload = &fragment[3..];
+        if self.inner.len().saturating_add(payload.len()) > total {
             return Err(TransportError::OutOfBounds);
         }
+        self.expected_sequence = self.expected_sequence.map(|n| n.wrapping_add(1));
+        self.inner.extend_from_slice(payload);
         if self.inner.len() == total {
             let value = std::mem::take(&mut self.inner);
             self.reset();

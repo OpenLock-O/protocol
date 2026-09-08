@@ -131,6 +131,9 @@ impl<S: PersistentState> LockState<S> {
             }
             return Ok(Decision::Authorized(Authorization::Counted { used, max }));
         }
+        if requested_use.is_some() {
+            return Err(Error::InvalidConsumption);
+        }
         Ok(Decision::Authorized(if grant.validity.is_some() {
             Authorization::Timed
         } else {
@@ -139,6 +142,9 @@ impl<S: PersistentState> LockState<S> {
     }
     pub fn consume(&mut self, grant: &Grant, decision: Decision) -> Result<(), Error> {
         if let Decision::Authorized(Authorization::Counted { used, max }) = decision {
+            if grant.max_uses != Some(max) {
+                return Err(Error::InvalidConsumption);
+            }
             let mut next = self.snapshot.clone();
             if next.usage.get(&grant.credential_id).copied().unwrap_or(0) != used {
                 return Err(Error::InvalidConsumption);
@@ -190,6 +196,9 @@ pub fn authorize_and_consume<S: PersistentState>(
     actuator: impl FnOnce() -> Result<(), ActuationError>,
 ) -> Result<(), Error> {
     let decision = lock.authorize(grant, signature, peer, now, use_number)?;
+    if matches!(decision, Decision::AlreadyConsumed { .. }) {
+        return Err(Error::InvalidConsumption);
+    }
     lock.consume(grant, decision)?;
     actuator().map_err(|_| Error::ActuatorFailed)
 }
@@ -247,5 +256,33 @@ mod tests {
             lock.authorize(&grant, &sig, grant.subject_key, None, Some(0)),
             Err(Error::BadSignature)
         );
+    }
+
+    #[test]
+    fn stale_counted_use_never_actuates() {
+        let (key, grant) = fixture();
+        let sig = sign_grant(&key, &grant).unwrap();
+        let mut lock = LockState::new(grant.lock_id, key.verifying_key(), Store::default());
+        let first = lock
+            .authorize(&grant, &sig, grant.subject_key, None, Some(0))
+            .unwrap();
+        lock.consume(&grant, first).unwrap();
+        let mut actuated = false;
+        assert_eq!(
+            authorize_and_consume(
+                &mut lock,
+                &grant,
+                &sig,
+                grant.subject_key,
+                None,
+                Some(0),
+                || {
+                    actuated = true;
+                    Ok(())
+                }
+            ),
+            Err(Error::InvalidConsumption)
+        );
+        assert!(!actuated);
     }
 }
