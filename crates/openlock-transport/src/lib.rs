@@ -1,4 +1,9 @@
 //! Byte-oriented transport extension point. Platform I/O stays outside this crate.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::vec::Vec;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]

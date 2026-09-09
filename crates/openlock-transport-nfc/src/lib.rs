@@ -1,4 +1,9 @@
 //! NFC bootstrap and ISO-DEP/APDU framing. Native reader/card I/O is platform-owned.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{vec, vec::Vec};
 use ed25519_dalek::VerifyingKey;
 use openlock_crypto::{cbor, verify_device_key};
 use openlock_transport::{FrameCodec, TransportError};
@@ -129,7 +134,7 @@ impl FrameCodec for IsoDepCodec {
         self.expected_sequence = self.expected_sequence.map(|n| n.wrapping_add(1));
         self.inner.extend_from_slice(payload);
         if self.inner.len() == total {
-            let value = std::mem::take(&mut self.inner);
+            let value = core::mem::take(&mut self.inner);
             self.reset();
             Ok(Some(value))
         } else {

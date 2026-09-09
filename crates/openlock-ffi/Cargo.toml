@@ -9,6 +9,6 @@ rust-version.workspace = true
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-openlock-core = { path = "../openlock-core" }
-openlock-protocol.workspace = true
-openlock-types.workspace = true
+openlock-core = { path = "../openlock-core", features = ["std"] }
+openlock-protocol = { workspace = true, features = ["std"] }
+openlock-types = { workspace = true, features = ["std"] }

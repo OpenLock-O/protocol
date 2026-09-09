@@ -5,5 +5,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["std"]
+std = ["openlock-transport/std"]
+
 [dependencies]
-openlock-transport.workspace = true
+openlock-transport = { workspace = true, default-features = false }

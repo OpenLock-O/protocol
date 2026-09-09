@@ -1,7 +1,11 @@
 //! Transport-neutral OpenLock v2 message envelope and session state machine.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 use openlock_crypto::{cbor, NoiseChannel};
 use openlock_types::*;
-use std::collections::BTreeMap;
 
 pub const PROFILE: u64 = 1;
 pub const KIND_HANDSHAKE: u8 = 0;
@@ -477,6 +481,22 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v2_packet_matches_fixed_wire_bytes() {
+        let encoded = [
+            0x86, 0x02, 0x01, 0x01, 0x18, 0x18, 0x07, 0x43, 0xaa, 0xbb, 0xcc,
+        ];
+        let packet = Packet {
+            kind: KIND_REQUEST,
+            request_id: 24,
+            capabilities: CAP_UNLOCK | CAP_STATUS | CAP_POLICY,
+            payload: vec![0xaa, 0xbb, 0xcc],
+        };
+        assert_eq!(encode_packet(&packet).unwrap(), encoded);
+        assert_eq!(decode_packet(&encoded), Ok(packet));
+    }
+
     #[test]
     fn noise_session_round_trip_over_arbitrary_bytes() {
         let mut phone = Session::initiator(

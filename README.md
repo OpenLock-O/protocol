@@ -26,6 +26,29 @@ Android SDK (API 35) with NDK support. Android SDK licenses are enabled through
 `devenv.yaml`; `local.properties` is generated automatically and remains
 machine-local.
 
+The seven runtime crates (`openlock-types`, `openlock-crypto`,
+`openlock-protocol`, `openlock-core`, `openlock-transport`,
+`openlock-transport-ble`, and `openlock-transport-nfc`) default to `std` and
+support `no_std + alloc` with `--no-default-features`. Downstream firmware must
+set `default-features = false` on every OpenLock runtime dependency. Cargo
+unifies features, so enabling `std` through any dependency restores it for the
+affected crates. An embedded application must provide a global allocator,
+a hardware-backed `getrandom` custom backend for Noise ephemeral keys, and its
+own BLE/NFC stack, clock, durable storage and actuator integration. The issuer
+and FFI crates remain host-side tools.
+
+The development shell includes `thumbv7em-none-eabihf`. Run the runtime tests
+without default features and the embedded compile check with:
+
+```sh
+devenv shell -- no-std-check
+```
+
+The script selects the custom RNG backend only for the embedded check; host
+tests use the host OS RNG. See [embedded integration](docs/architecture.md#embedded-integration)
+for the allocator, panic handler and RNG contracts. The target check compiles
+the libraries; it does not link or run board firmware.
+
 ## Workspace
 
 - `openlock-types`: shared v2 domain types and stable errors.

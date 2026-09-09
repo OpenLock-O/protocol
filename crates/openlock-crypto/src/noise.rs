@@ -1,3 +1,4 @@
+use alloc::{boxed::Box, vec, vec::Vec};
 use openlock_types::{Error, SubjectKey, MAX_MESSAGE_SIZE};
 
 pub const NOISE_SUITE: &str = "Noise_IK_25519_ChaChaPoly_SHA256";
@@ -64,7 +65,7 @@ impl NoiseChannel {
     }
     fn finish_handshake(&mut self) -> Result<(), Error> {
         if matches!(&self.state, State::Handshake(s) if s.is_handshake_finished()) {
-            let State::Handshake(s) = std::mem::replace(&mut self.state, State::Closed) else {
+            let State::Handshake(s) = core::mem::replace(&mut self.state, State::Closed) else {
                 unreachable!()
             };
             self.state =

@@ -1,8 +1,8 @@
 //! The v2 profile permits only definite, minimally encoded arrays, bytes and integers.
+use alloc::vec::Vec;
 pub use ciborium::value::Value;
 use ciborium::{de::from_reader, ser::into_writer};
 use openlock_types::{Error, MAX_OBJECT_SIZE};
-use std::io::Cursor;
 
 pub fn uint(n: u64) -> Value {
     Value::Integer(n.into())
@@ -62,10 +62,63 @@ pub fn decode_limit(bytes: &[u8], limit: usize) -> Result<Value, Error> {
     if bytes.len() > limit {
         return Err(Error::ObjectTooLarge);
     }
-    let mut cursor = Cursor::new(bytes);
-    let value: Value = from_reader(&mut cursor).map_err(|_| Error::InvalidPayload)?;
-    if cursor.position() as usize != bytes.len() || encode_limit(&value, limit)? != bytes {
+    let mut input = bytes;
+    let value: Value = from_reader(&mut input).map_err(|_| Error::InvalidPayload)?;
+    if !input.is_empty() || encode_limit(&value, limit)? != bytes {
         return Err(Error::InvalidPayload);
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn slice_reader_consumes_one_complete_value() {
+        let encoded = [0x82, 0x18, 0x18, 0x42, 0x01, 0x02];
+        let value = array(vec![uint(24), bytes(&[1, 2])]);
+        assert_eq!(decode(&encoded), Ok(value.clone()));
+        assert_eq!(encode(&value).unwrap(), encoded);
+
+        for end in 0..encoded.len() {
+            assert_eq!(decode(&encoded[..end]), Err(Error::InvalidPayload));
+        }
+        let mut trailing = encoded.to_vec();
+        trailing.push(0);
+        assert_eq!(decode(&trailing), Err(Error::InvalidPayload));
+    }
+
+    #[test]
+    fn slice_reader_rejects_noncanonical_encodings() {
+        for encoded in [
+            &[0x18, 0x01][..],
+            &[0x19, 0x00, 0x18],
+            &[0x98, 0x01, 0x01],
+            &[0x9f, 0x01, 0xff],
+            &[0x58, 0x01, 0x01],
+            &[0x5f, 0x41, 0x01, 0xff],
+        ] {
+            assert_eq!(decode(encoded), Err(Error::InvalidPayload));
+        }
+    }
+
+    #[test]
+    fn slice_reader_preserves_size_limits() {
+        let mut encoded = vec![0x59, 0x0f, 0xfd];
+        encoded.resize(MAX_OBJECT_SIZE, 0x42);
+        let value = decode(&encoded).unwrap();
+        assert_eq!(encode(&value).unwrap(), encoded);
+        assert_eq!(
+            decode_limit(&encoded, MAX_OBJECT_SIZE - 1),
+            Err(Error::ObjectTooLarge)
+        );
+        assert_eq!(
+            encode_limit(&value, MAX_OBJECT_SIZE - 1),
+            Err(Error::ObjectTooLarge)
+        );
+        encoded.push(0);
+        assert_eq!(decode(&encoded), Err(Error::ObjectTooLarge));
+    }
 }

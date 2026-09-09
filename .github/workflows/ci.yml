@@ -45,6 +45,9 @@ jobs:
       - name: Build workspace
         run: devenv shell -- build
 
+      - name: Check no_std embedded target
+        run: devenv shell -- no-std-check
+
   bindings:
     name: Swift, Kotlin and JNI bindings
     runs-on: macos-14

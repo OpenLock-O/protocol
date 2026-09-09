@@ -5,10 +5,14 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["std"]
+std = ["openlock-types/std"]
+
 [dependencies]
-openlock-types.workspace = true
+openlock-types = { workspace = true, default-features = false }
 ed25519-dalek.workspace = true
 sha2.workspace = true
-ciborium.workspace = true
-snow.workspace = true
+ciborium = { workspace = true, default-features = false }
+snow = { workspace = true, default-features = false }
 x25519-dalek.workspace = true

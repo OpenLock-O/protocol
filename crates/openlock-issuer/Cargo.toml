@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-openlock-core = { path = "../openlock-core" }
-openlock-crypto.workspace = true
-openlock-types.workspace = true
+openlock-core = { path = "../openlock-core", features = ["std"] }
+openlock-crypto = { workspace = true, features = ["std"] }
+openlock-types = { workspace = true, features = ["std"] }
 ed25519-dalek.workspace = true

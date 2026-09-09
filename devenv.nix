@@ -32,6 +32,7 @@
   languages.rust.enable = true;
   languages.rust.channel = "stable";
   languages.rust.components = [ "rustc" "cargo" "rustfmt" "clippy" ];
+  languages.rust.targets = [ "thumbv7em-none-eabihf" ];
 
   env.OPENLOCK_OFFLINE = "1";
   env.CARGO_NET_OFFLINE = "true";
@@ -47,6 +48,23 @@
 
   scripts.build.exec = ''
     cargo build --workspace --all-targets
+  '';
+
+  scripts.no-std-check.exec = ''
+    set -eu
+    cargo test --locked --workspace --no-default-features \
+      --exclude openlock-issuer \
+      --exclude openlock-ffi
+    RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --locked --lib \
+      -p openlock-types \
+      -p openlock-crypto \
+      -p openlock-protocol \
+      -p openlock-core \
+      -p openlock-transport \
+      -p openlock-transport-ble \
+      -p openlock-transport-nfc \
+      --no-default-features \
+      --target thumbv7em-none-eabihf
   '';
 
   enterShell = ''

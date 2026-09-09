@@ -1,8 +1,15 @@
 //! v2 authorization domain. Transport and cryptographic primitives live in
 //! `openlock-protocol`, `openlock-transport-*`, and `openlock-crypto`.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use ed25519_dalek::VerifyingKey;
 use openlock_crypto::{read_grant, read_policy};
-use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub use openlock_crypto::{verify_grant, verify_policy};

@@ -1,4 +1,5 @@
 use crate::cbor::*;
+use alloc::{vec, vec::Vec};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use openlock_types::*;
 

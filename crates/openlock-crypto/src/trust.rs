@@ -2,11 +2,11 @@ use crate::cbor::*;
 use crate::cose::{sign_object, verify_object};
 use crate::validate_public;
 use crate::VerifyingKey;
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 use openlock_types::{
     ClockSample, DeviceKey, DeviceKeyRecord, Error, KeyUpdate, LockId, KNOWN_CAPABILITIES,
 };
-use std::collections::BTreeMap;
 
 const DEVICE: &[u8] = b"openlock:v2:device-key";
 const UPDATE: &[u8] = b"openlock:v2:key-update";

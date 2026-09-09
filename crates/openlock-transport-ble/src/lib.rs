@@ -1,3 +1,8 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{vec, vec::Vec};
 use openlock_transport::{FrameCodec, TransportError};
 pub const HEADER_SIZE: usize = 8;
 pub const MAX_FRAME_MESSAGE: usize = 4096;
@@ -147,7 +152,7 @@ impl FrameCodec for BleCodec {
             self.received[at] = true;
         }
         if self.received.iter().all(|v| *v) {
-            let result = std::mem::take(&mut self.bytes);
+            let result = core::mem::take(&mut self.bytes);
             self.reset();
             Ok(Some(result))
         } else {

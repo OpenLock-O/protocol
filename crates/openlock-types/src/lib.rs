@@ -1,5 +1,9 @@
 //! Shared domain values. No transport, cryptography or platform dependencies.
-use std::collections::BTreeSet;
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{collections::BTreeSet, vec::Vec};
 use thiserror::Error;
 
 pub const PROTOCOL_VERSION: u64 = 2;

@@ -19,21 +19,23 @@ license = "LGPL-3.0-or-later"
 rust-version = "1.81"
 
 [workspace.dependencies]
-openlock-types = { path = "crates/openlock-types" }
-openlock-crypto = { path = "crates/openlock-crypto" }
-openlock-core = { path = "crates/openlock-core" }
-openlock-protocol = { path = "crates/openlock-protocol" }
-openlock-transport = { path = "crates/openlock-transport" }
-openlock-transport-ble = { path = "crates/openlock-transport-ble" }
-openlock-transport-nfc = { path = "crates/openlock-transport-nfc" }
+openlock-types = { path = "crates/openlock-types", default-features = false }
+openlock-crypto = { path = "crates/openlock-crypto", default-features = false }
+openlock-core = { path = "crates/openlock-core", default-features = false }
+openlock-protocol = { path = "crates/openlock-protocol", default-features = false }
+openlock-transport = { path = "crates/openlock-transport", default-features = false }
+openlock-transport-ble = { path = "crates/openlock-transport-ble", default-features = false }
+openlock-transport-nfc = { path = "crates/openlock-transport-nfc", default-features = false }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
 sha2 = { version = "0.10", default-features = false }
-ciborium = "0.2"
+ciborium = { version = "0.2", default-features = false }
 snow = { version = "0.10", default-features = false, features = [
   "default-resolver",
-  "default-resolver-crypto",
-  "std",
+  "use-curve25519",
+  "use-chacha20poly1305",
+  "use-sha2",
+  "use-getrandom",
 ] }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
-thiserror = "1"
+thiserror = { version = "2.0.20", default-features = false }
 rand_core = { version = "0.6", default-features = false }

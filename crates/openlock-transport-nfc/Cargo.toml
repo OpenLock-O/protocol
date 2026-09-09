@@ -5,8 +5,16 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["std"]
+std = [
+  "openlock-crypto/std",
+  "openlock-transport/std",
+  "openlock-types/std",
+]
+
 [dependencies]
-openlock-crypto.workspace = true
-openlock-transport.workspace = true
-openlock-types.workspace = true
+openlock-crypto = { workspace = true, default-features = false }
+openlock-transport = { workspace = true, default-features = false }
+openlock-types = { workspace = true, default-features = false }
 ed25519-dalek.workspace = true

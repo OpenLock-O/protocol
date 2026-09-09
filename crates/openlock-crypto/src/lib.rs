@@ -1,4 +1,8 @@
 //! Cryptographic operations and explicit trust lifecycle, independent of I/O.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 pub mod cbor;
 pub mod cose;
 pub mod noise;
