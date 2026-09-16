@@ -1,35 +1,41 @@
-# Kotlin binding (v3)
+# Kotlin binding (OpenLock v3)
 
-`OpenLock` is a stateless JVM/Android wrapper around the plaintext TOTP C ABI.
-There are no session handles, handshakes, public-key parameters or native close
-operations. Provision a unique 32-byte secret per lock/credential through a
-trusted local path; never transmit the secret over the access channel.
+V3 contains both the fully supported secure v2 scheme and optional plaintext
+TOTP. Choose the scheme explicitly through trusted application/device policy.
+Do not fall back to TOTP when a secure session fails.
+
+`OpenLockSession` retains the v2 API:
+
+```kotlin
+OpenLockSession.initiator(privateKey, lockPublicKey, capabilities).use { session ->
+    // Existing v2 session handle ownership; platform I/O remains host-owned.
+}
+```
+
+`OpenLock` is the separate stateless TOTP API:
 
 ```kotlin
 val request = OpenLock.makeUnlock(secret, credentialId = 7L, unixSeconds = now)
-// Send the 18 bytes over BLE or NFC using platform APIs.
+// Send the 18 bytes through the configured TOTP BLE/NFC endpoint.
 val result = OpenLock.decodeResponse(receivedBytes)
-// Correlate result.credentialId and result.timeStep with the submitted request.
 ```
 
-`encodeUnlock(credentialId, timeStep, code)` also encodes an eight-digit code
-received out of band. IDs must be in `1..0xffffffff`; timestamps/steps must be
-nonnegative. The numeric code is in `0..99_999_999`.
-
-A decoded response is unauthenticated. `errorCode == 0` is a reported success,
-not cryptographic evidence of physical actuation. Code 24 means the step was
-consumed/superseded and cannot actuate again. After an ambiguous result, do not
-automatically issue another opening. After consumption, use a later step.
+For TOTP, provision a unique 32-byte key per lock/credential through a trusted
+local path. `encodeUnlock(credentialId, timeStep, code)` also encodes a code
+received out of band. IDs are `1..0xffffffff`, timestamps/steps are nonnegative,
+and codes are `0..99_999_999`. A result is unauthenticated; correlate its ID/step
+but do not treat it as proof of physical opening. Code 24 rejects a consumed or
+superseded step. Consumption survives failed actuation, reconnection and reboot.
 
 Run `gradle --no-daemon --console=plain build` to build the JVM package. Build
-Rust `openlock-ffi` for each Android ABI, make `openlock_ffi` available to the
-Android native linker, and build the JNI shim in `src/main/cpp`. Package both
-`libopenlock_jni.so` and `libopenlock_ffi.so`. The Kotlin class loads
-`openlock_jni`, which links the Rust ABI. The CMake include path points to the
-repository's canonical `include/openlock.h`.
+Rust `openlock-ffi` with its default `secure,totp` features for each Android ABI,
+make the library available to the Android linker, and build the JNI shim in
+`src/main/cpp`. Package both `libopenlock_jni.so` and `libopenlock_ffi.so`.
+Both entry points load `openlock_jni`, which exports the two method sets and
+links Rust. The header path points to the canonical `include/openlock.h`.
 
-Android BLE/NFC callbacks, trusted client time, key storage and credential
-lifetimes are application responsibilities. Native code clears its temporary
-key buffer; the application owns copies in Java/Kotlin. Lock firmware must
-implement the mandatory durable replay and rate-limit rules in
-[the protocol](../../docs/protocol.md); decoding a packet alone is insufficient.
+BLE/NFC callbacks, secure key storage and explicit scheme selection belong to
+the application. Lock firmware must enforce each scheme's authorization and
+persistence contract; packet decoding is not authorization. See the
+[v3 protocol overview](../../docs/protocol.md) and
+[TOTP contract](../../docs/protocol-totp.md).

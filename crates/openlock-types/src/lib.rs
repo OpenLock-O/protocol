@@ -1,147 +1,204 @@
-//! Fixed-size values for the OpenLock v3 plaintext TOTP profile.
+//! Shared domain values. No transport, cryptography or platform dependencies.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{collections::BTreeSet, vec::Vec};
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION: u8 = 3;
-pub const PROFILE: u8 = 1;
-pub const MAX_MESSAGE_SIZE: usize = 20;
-pub const TOTP_PERIOD: u64 = 30;
-pub const TOTP_DIGITS: u32 = 8;
-pub const TOTP_MODULUS: u32 = 100_000_000;
-pub const TOTP_SECRET_SIZE: usize = 32;
-pub const ALLOWED_CLOCK_SKEW_STEPS: u64 = 1;
-/// Lock-wide, including unknown credential IDs; never reset on reconnect.
-pub const MAX_ATTEMPTS_PER_STEP: u8 = 5;
+pub const PROTOCOL_VERSION: u64 = 2;
+pub const MAX_OBJECT_SIZE: usize = 4096;
+pub const MAX_MESSAGE_SIZE: usize = 4096;
+pub const RIGHTS_UNLOCK: u32 = 1;
+pub const RIGHTS_STATUS: u32 = 2;
+pub const CAP_UNLOCK: u64 = 1;
+pub const CAP_STATUS: u64 = 2;
+pub const CAP_POLICY: u64 = 4;
+pub const KNOWN_CAPABILITIES: u64 = CAP_UNLOCK | CAP_STATUS | CAP_POLICY;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LockId(pub [u8; 16]);
-/// A nonzero, locally provisioned identifier, unique within a lock.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct CredentialId(pub u32);
-
+pub struct CredentialId(pub [u8; 16]);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubjectKey(pub [u8; 32]);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Validity {
     pub not_before: u64,
-    /// Exclusive end, in Unix seconds.
     pub not_after: u64,
 }
-impl Validity {
-    pub fn validate(self) -> Result<(), Error> {
-        if self.not_before >= self.not_after {
-            Err(Error::InvalidPayload)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct UnlockRequest {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Grant {
     pub credential_id: CredentialId,
-    pub time_step: u64,
-    /// Numeric encoding of an eight-digit OTP, including leading zeroes.
-    pub code: u32,
+    pub lock_id: LockId,
+    pub subject_key: SubjectKey,
+    pub rights: u32,
+    pub epoch: u64,
+    pub validity: Option<Validity>,
+    pub max_uses: Option<u32>,
 }
-impl UnlockRequest {
-    pub fn validate(self) -> Result<(), Error> {
-        if self.credential_id.0 == 0 || self.code >= TOTP_MODULUS {
-            Err(Error::InvalidPayload)
-        } else {
-            Ok(())
-        }
-    }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyUpdate {
+    pub lock_id: LockId,
+    pub epoch: u64,
+    pub version: u64,
+    pub revoked: BTreeSet<CredentialId>,
 }
-
-/// Informational only: plaintext responses do not authenticate the lock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct UnlockResponse {
-    pub credential_id: CredentialId,
-    pub time_step: u64,
-    pub result: Result<(), Error>,
+pub struct ClockSample {
+    pub lower: u64,
+    pub upper: u64,
 }
-impl UnlockResponse {
-    pub fn for_request(request: &UnlockRequest, result: Result<(), Error>) -> Self {
-        Self {
-            credential_id: request.credential_id,
-            time_step: request.time_step,
-            result,
+impl ClockSample {
+    pub fn validate(self) -> Result<Self, Error> {
+        if self.lower > self.upper {
+            Err(Error::ClockUntrusted)
+        } else {
+            Ok(self)
         }
     }
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Authorization {
+    LongLived,
+    Timed,
+    Counted { used: u32, max: u32 },
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Decision {
+    Authorized(Authorization),
+    AlreadyConsumed { next_use: u32 },
+}
 
-#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessRequest {
+    pub credential: Vec<u8>,
+    pub requested_use: Option<u32>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Command {
+    Unlock(AccessRequest),
+    Status(AccessRequest),
+    ApplyPolicy(Vec<u8>),
+}
+impl Command {
+    pub fn capability(&self) -> u64 {
+        match self {
+            Self::Unlock(_) => CAP_UNLOCK,
+            Self::Status(_) => CAP_STATUS,
+            Self::ApplyPolicy(_) => CAP_POLICY,
+        }
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Response {
+    Unlocked,
+    Status { epoch: u64, policy_version: u64 },
+    PolicyApplied,
+    AlreadyConsumed { next_use: u32 },
+    Rejected { code: u32 },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceKey {
+    pub device_id: LockId,
+    pub key_id: u32,
+    pub key_version: u32,
+    pub x25519_public_key: [u8; 32],
+    /// Independent Ed25519 key; an X25519 key cannot sign rotation records.
+    pub rotation_public_key: [u8; 32],
+    pub capabilities: u64,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceKeyRecord {
+    pub key: DeviceKey,
+    pub issuer_key_id: u32,
+    pub signature: Vec<u8>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeyUpdate {
+    pub old_key_id: u32,
+    pub new_record: DeviceKeyRecord,
+    pub not_before: u64,
+    pub retire_after: u64,
+    /// None means the old device's rotation key; Some identifies a trusted root.
+    pub issuer_key_id: Option<u32>,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum Error {
     #[error("object is too large")]
     ObjectTooLarge,
+    #[error("invalid COSE object")]
+    InvalidCose,
     #[error("invalid payload")]
     InvalidPayload,
+    #[error("signature verification failed")]
+    BadSignature,
     #[error("wrong lock")]
     WrongLock,
-    #[error("credential is disabled")]
+    #[error("credential is revoked")]
     Revoked,
+    #[error("credential epoch is stale")]
+    StaleEpoch,
     #[error("credential is outside its validity window")]
     Expired,
-    #[error("clock is missing, untrusted or has moved backwards")]
+    #[error("clock is not trusted")]
     ClockUntrusted,
     #[error("credential usage exhausted")]
     UsageExhausted,
-    #[error("persistent storage failed or contains invalid state")]
+    #[error("policy version is stale or conflicting")]
+    StalePolicy,
+    #[error("persistent storage failed")]
     StorageUnavailable,
+    #[error("invalid consumption sequence")]
+    InvalidConsumption,
+    #[error("requested right is not present")]
+    MissingRight,
+    #[error("Noise authentication failed")]
+    Noise,
     #[error("unsupported protocol version or profile")]
     UnsupportedVersion,
-    #[error("actuation failed; the OTP remains consumed")]
+    #[error("invalid session state")]
+    InvalidState,
+    #[error("unsupported capability")]
+    UnsupportedCapability,
+    #[error("untrusted identity")]
+    UntrustedKey,
+    #[error("stale or conflicting key version")]
+    StaleKey,
+    #[error("actuation failed; result may be ambiguous")]
     ActuatorFailed,
     #[error("invalid NFC record")]
     InvalidNfc,
-    #[error("invalid TOTP or time step outside the allowed window")]
-    InvalidTotp,
-    #[error("TOTP time step has already been consumed or superseded")]
-    Replayed,
-    #[error("too many attempts in this time step")]
-    RateLimited,
-    #[error("unknown credential")]
-    UnknownCredential,
 }
 impl Error {
-    /// Retained v2 meanings keep their numbers; removed v2 codes are reserved.
-    pub const fn code(self) -> u32 {
+    /// Stable, positive v2 wire/FFI error codes.
+    pub fn code(&self) -> u32 {
         match self {
             Self::ObjectTooLarge => 1,
+            Self::InvalidCose => 2,
             Self::InvalidPayload => 3,
+            Self::BadSignature => 4,
             Self::WrongLock => 5,
             Self::Revoked => 6,
+            Self::StaleEpoch => 7,
             Self::Expired => 8,
             Self::ClockUntrusted => 9,
             Self::UsageExhausted => 10,
+            Self::StalePolicy => 11,
             Self::StorageUnavailable => 12,
+            Self::InvalidConsumption => 13,
+            Self::MissingRight => 14,
+            Self::Noise => 15,
             Self::UnsupportedVersion => 16,
+            Self::InvalidState => 17,
+            Self::UnsupportedCapability => 18,
+            Self::UntrustedKey => 19,
+            Self::StaleKey => 20,
             Self::ActuatorFailed => 21,
             Self::InvalidNfc => 22,
-            Self::InvalidTotp => 23,
-            Self::Replayed => 24,
-            Self::RateLimited => 25,
-            Self::UnknownCredential => 26,
         }
-    }
-    pub const fn from_code(code: u32) -> Option<Self> {
-        Some(match code {
-            1 => Self::ObjectTooLarge,
-            3 => Self::InvalidPayload,
-            5 => Self::WrongLock,
-            6 => Self::Revoked,
-            8 => Self::Expired,
-            9 => Self::ClockUntrusted,
-            10 => Self::UsageExhausted,
-            12 => Self::StorageUnavailable,
-            16 => Self::UnsupportedVersion,
-            21 => Self::ActuatorFailed,
-            22 => Self::InvalidNfc,
-            23 => Self::InvalidTotp,
-            24 => Self::Replayed,
-            25 => Self::RateLimited,
-            26 => Self::UnknownCredential,
-            _ => return None,
-        })
     }
 }

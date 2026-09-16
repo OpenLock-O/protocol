@@ -1,11 +1,11 @@
 //! Full client/transport/lock path, with one shared durable state across links.
-use openlock_core::{AttemptState, Credential, LockState, PersistentState, UsageState};
-use openlock_crypto::{unlock_request, TotpSecret};
-use openlock_protocol::{decode_response, decode_unlock, encode_response, encode_unlock};
-use openlock_transport::FrameCodec;
-use openlock_transport_ble::BleCodec;
-use openlock_transport_nfc::IsoDepCodec;
-use openlock_types::{CredentialId, Error, LockId, UnlockResponse};
+use openlock_totp::core::{AttemptState, Credential, LockState, PersistentState, UsageState};
+use openlock_totp::crypto::{unlock_request, TotpSecret};
+use openlock_totp::protocol::{decode_response, decode_unlock, encode_response, encode_unlock};
+use openlock_totp::transport::ble::BleCodec;
+use openlock_totp::transport::nfc::IsoDepCodec;
+use openlock_totp::transport::FrameCodec;
+use openlock_totp::types::{CredentialId, Error, LockId, UnlockResponse};
 
 struct Store {
     attempts: AttemptState,

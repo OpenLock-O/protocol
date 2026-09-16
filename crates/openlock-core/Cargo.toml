@@ -7,8 +7,13 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["openlock-types/std", "openlock-crypto/std"]
+std = ["openlock-types/std", "openlock-crypto/std", "thiserror/std"]
 
 [dependencies]
 openlock-types = { workspace = true, default-features = false }
 openlock-crypto = { workspace = true, default-features = false }
+ed25519-dalek.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rand_core.workspace = true

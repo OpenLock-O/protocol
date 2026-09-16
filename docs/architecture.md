@@ -1,169 +1,128 @@
 # OpenLock v3 architecture
 
-The access path is one request and one response:
+V3 fully includes the secure v2 implementation and offers a separate TOTP
+implementation. The original secure runtime crates retain their source APIs and
+wire behavior; `openlock-totp` is an independent crate for constrained devices.
+Both are members of the same version 0.3 Cargo workspace.
 
 ```text
-Client                                  Lock
-secret + local time                     trusted RTC + local credential store
-  |                                       |
-  +-- 18-byte plaintext Unlock ---------->+ syntax/time window
-                                          + reserve durable attempt budget
-                                          + load local key/policy
-                                          + reject consumed time step
-                                          + one HMAC-SHA-256 comparison
-                                          + durable consumption commit
-                                          + actuator callback
-  <--- 15-byte plaintext result ----------+
+Trusted deployment configuration
+  |
+  +-- Secure scheme --> original openlock-* crates
+  |                    Noise / COSE / policy / trust / fragmentation
+  |                    v2 wire and APIs remain compatible
+  |
+  +-- TOTP scheme ----> openlock-totp
+                       HMAC / durable one-time use / local policy
+                       small plaintext packets, no heap or RNG
+
+Host-side openlock-ffi (default: both)
+  +-- original openlock_session_* and credential-ID ABI
+  +-- stateless TOTP generation/encoding/decoding ABI
 ```
 
-There are no sessions or public-key identities. `openlock-protocol` encodes
-fixed arrays and parses borrowed slices. BLE and ISO-DEP adapters carry a
-complete message directly. `openlock-core::LockState` owns authorization;
-transport parsers and TOTP primitives cannot authorize an actuation by
-themselves. The [protocol](protocol.md) defines exact bytes and security rules.
+There is no authentication downgrade or automatic fallback between paths. Both
+library features being present does not enable TOTP access on a device: the
+host must explicitly provision and enable that scheme. The
+[protocol overview](protocol.md) defines selection and authorization isolation.
 
-## Embedded integration
+## Secure v2 integration
 
-All seven runtime crates support `no_std` without `alloc`. Firmware disables
-default features on each OpenLock dependency. No runtime RNG, allocator, Noise
-backend, certificate store, dynamically allocated map, or fragment buffer is
-needed. The host still supplies its panic handler and board integration.
-`openlock-issuer` and `openlock-ffi` are host-side crates.
+The seven existing runtime crates (`openlock-types`, `openlock-crypto`,
+`openlock-protocol`, `openlock-core`, `openlock-transport`,
+`openlock-transport-ble`, `openlock-transport-nfc`) retain the complete v2
+implementation and API. This includes Noise sessions, signed grants, policy
+updates, trust/rotation, signed NFC bootstrap and bounded fragmentation.
 
-The cryptographic dependencies are HMAC, SHA-256, constant-time comparison and
-secret zeroization. The runtime uses fixed-size values and stack buffers.
-There is no measured MCU stack/flash or battery guarantee: choose a board,
-measure its radio/RTC/NVM/actuator costs, and account for durable writes. Removing
-handshakes and fragmentation reduces protocol communication; actuator energy
-and standby current may still dominate total consumption.
+They support `no_std + alloc` with default features disabled. Firmware supplies
+a global allocator, panic handler, secure RNG backend for Noise ephemeral keys,
+and its BLE/NFC, clock, storage and actuator integration. The existing
+[secure embedded integration contract](architecture-v2.md#embedded-integration)
+is retained in full. Secure `PROTOCOL_VERSION` and Noise prologue remain at v2,
+so old clients and credential material remain usable.
 
-Implement `PersistentState` over a journal, FRAM or other atomic durable store:
+## Independent TOTP integration
 
-| Method | Contract |
+TOTP-only firmware needs one dependency:
+
+```toml
+[dependencies]
+openlock-totp = { version = "0.3", default-features = false }
+```
+
+For a checkout-based build, use `path = ".../crates/openlock-totp"` instead of
+a registry version. The crate is not dependent on any secure runtime crate and
+has no Noise, Ed25519, X25519, CBOR, allocator or getrandom dependency. Its
+modules are `types`, `crypto`, `core`, `protocol`, `transport::{ble,nfc}` and
+`provisioning`. See [TOTP firmware integration](architecture-totp.md).
+
+`openlock_totp::core::LockState` enforces the durable replay and attempt budget
+rules. TOTP primitives and wire parsers alone do not authorize opening. Keys,
+usage and policy types belong to the TOTP namespace; v2 `Grant`, `Issuer`,
+`LockState`, `CredentialId` and error types retain their original meanings.
+`openlock_issuer::totp` re-exports the TOTP local provisioning helpers for host
+applications alongside the original signing issuer.
+
+## C and mobile bindings
+
+The default `openlock-ffi` exports both schemes. The original `openlock_session_*`
+and `openlock_credential_id` symbols and layouts are retained. The added
+`openlock_totp`, `openlock_make_unlock`, `openlock_encode_unlock`,
+`openlock_decode_unlock`, `openlock_encode_response` and
+`openlock_decode_response` symbols are TOTP-only helpers. Both header copies
+contain the same declarations; C ABI structs are native layouts, not packets.
+
+Feature selection can limit the exported implementation:
+
+```sh
+# Combined (backward-compatible default):
+cargo build -p openlock-ffi
+# Secure only:
+cargo build -p openlock-ffi --no-default-features --features secure
+# TOTP only, excluding secure crypto/session dependencies:
+cargo build -p openlock-ffi --no-default-features --features totp
+```
+
+Headers declare both schemes. Consumers of a restricted build must use only its
+selected symbols. FFI remains host-side; embedded TOTP firmware uses
+`openlock-totp` directly. FFI feature selection is a build choice, not a device
+security negotiation mechanism.
+
+Swift and Kotlin expose the original `OpenLockSession` APIs and the added
+stateless `OpenLock` TOTP helpers. The combined wrappers should link the default
+combined FFI library. JNI exports both sets of methods in `openlock_jni`, linked
+to `openlock_ffi`; both Kotlin entry points load the JNI shim. Applications own
+platform I/O, key storage and explicit scheme selection.
+
+## Compatibility with the TOTP proposal
+
+The former replacement-only proposal's Rust implementation moved as follows:
+
+| Proposal crate | Final optional scheme module |
 | --- | --- |
-| `load_attempts` | Return the latest lock-wide attempt record; fail on read errors/corruption |
-| `commit_attempts` | Atomically persist the entire attempt record before success |
-| `load_credential` | Look up the local credential, key, policy and latest usage by ID |
-| `commit_usage` | Atomically persist both consumed step and use count before success |
+| `openlock-types` | `openlock_totp::types` |
+| `openlock-crypto` | `openlock_totp::crypto` |
+| `openlock-core` | `openlock_totp::core` |
+| `openlock-protocol` | `openlock_totp::protocol` |
+| `openlock-transport` | `openlock_totp::transport` |
+| `openlock-transport-ble` / `openlock-transport-nfc` | `openlock_totp::transport::ble` / `openlock_totp::transport::nfc` |
+| local TOTP issuer | `openlock_totp::provisioning` or `openlock_issuer::totp` |
 
-Storage capacity is chosen by firmware; the core holds one credential at a time
-and has no collection of credentials. Each credential includes a 32-byte key,
-ID and lock binding, an enabled flag, optional validity/use limits, and
-`UsageState { last_accepted_step: Option<u64>, uses: u32 }`. Global
-`AttemptState { last_attempt_at: Option<u64>, attempts: u8 }` persists the rate
-budget and clock watermark. Encode fields explicitly; Rust layout and
-`Option<u64>` memory representation are not a storage format. Add whatever
-integrity, recovery and wear-leveling scheme the hardware needs.
-
-One owner MUST serialize requests across transports/connections and local
-management. `&mut LockState` prevents concurrent calls on that instance, but
-multiple instances over the same store still require external serialization.
-A reboot loads the authoritative durable state. Do not implement these methods
-with an in-memory-only store in production, clear state on reconnect, or turn
-storage errors into default values. Preserve consumption through local
-revocation/re-enablement; replacing/resetting a credential requires a new key.
-
-The host reads trusted Unix seconds from its RTC. Pass `None` when that clock
-is invalid. The core rejects rollback below the last committed attempt time;
-the host must also detect RTC faults before that watermark and large forward
-jumps. The wire exposes no clock-setting operation. Trusted local maintenance
-is required for provisioning, revocation, policy edits and clock recovery.
-
-A firmware handler can use the following structure:
-
-```rust
-use openlock_core::{ActuationError, LockState, PersistentState};
-use openlock_protocol::{decode_unlock, encode_response, UNLOCK_RESPONSE_SIZE};
-use openlock_types::{Error, UnlockResponse};
-
-fn handle<S: PersistentState>(
-    lock: &mut LockState<S>,
-    message: &[u8],
-    trusted_unix_seconds: Option<u64>,
-    actuator: impl FnOnce() -> Result<(), ActuationError>,
-) -> Result<[u8; UNLOCK_RESPONSE_SIZE], Error> {
-    let request = decode_unlock(message)?;
-    let result = lock.unlock(&request, trusted_unix_seconds, actuator);
-    encode_response(&UnlockResponse::for_request(&request, result))
-}
-```
-
-The callback is called at most once for an accepted step, after durable
-consumption. If it fails, the step stays consumed. Loss of power after the
-commit but before actuation sacrifices availability to avoid a duplicate
-opening; the next attempt must use a later step. Send the response only after
-the handler returns. A plaintext response still cannot prove physical opening.
-
-## Client and binding integration
-
-Rust clients use `openlock_crypto::unlock_request` then
-`openlock_protocol::encode_unlock`. C clients use `openlock_make_unlock` or
-`openlock_encode_unlock`, send the resulting bytes, and parse results with
-`openlock_decode_response`. `openlock_totp` is also available for displaying an
-eight-digit code. Decoders do not perform authorization.
-
-Swift:
-
-```swift
-let packet = try OpenLock.makeUnlock(secret: provisionedSecret,
-                                    credentialID: 7, unixSeconds: trustedNow)
-// Send packet with the platform BLE/NFC APIs.
-let result = try OpenLock.decodeResponse(receivedBytes)
-```
-
-Kotlin:
-
-```kotlin
-val packet = OpenLock.makeUnlock(provisionedSecret, credentialId = 7L, unixSeconds = trustedNow)
-// Send packet with the platform BLE/NFC APIs.
-val result = OpenLock.decodeResponse(receivedBytes)
-```
-
-Check response correlation against the submitted ID and step. Do not silently
-retry on lost/ambiguous replies or interpret `Replayed` as a fresh opening. The
-same credential must wait for a strictly later step after use. Neither wrapper
-retains a native session handle. Applications own secure key storage and the
-lifetimes/copies of secret buffers; Rust key wrappers redact Debug output and
-zeroize their own key bytes on drop, not every copy in a platform or crypto
-library. Kotlin uses signed nonnegative `Long` values for timestamps/steps and
-IDs in `1..0xffffffff`; response steps beyond `Long.MAX_VALUE` are rejected.
-
-Build Swift with `swift build` in `bindings/swift`. Consumers link the Rust
-`openlock_ffi` library for the target architecture. Kotlin loads `openlock_jni`,
-which links `openlock_ffi`; package both target-ABI libraries. Both header copies
-must remain identical. C ABI structs are native layouts, never wire layouts.
-
-## v2 migration and compatibility
-
-| v2 | v3 |
-| --- | --- |
-| Noise IK session and `Session::start/receive/send` | Stateless `encode_unlock/decode_unlock` and response functions |
-| X25519/Ed25519 keys and COSE grants | Unique shared key and local credential policy |
-| Remote signed policy/key updates | Trusted local maintenance |
-| Subject-key proof and grant rights | One operation, Unlock, authenticated by its credential TOTP |
-| Optional grant consumption counter | Mandatory durable TOTP step consumption plus optional usage cap |
-| Signed CBOR NDEF device record | Unauthenticated fixed-size discovery hint |
-| Up to 4096-byte packets and fragments | 18-byte request, 15-byte result, maximum transport payload 20 |
-| `no_std + alloc` and custom RNG | `no_std`, no heap and no runtime RNG |
-| Stateful C `openlock_session_*` ABI | Stateless `openlock_make_unlock` / `openlock_decode_response` ABI |
-
-Protocol version 3, crate version 0.3, new NDEF MIME, C headers and mobile
-bindings move together. V2 messages and key material do not automatically
-migrate. Provision new unique symmetric keys through a trusted path. No v2
-fallback or mixed-session compatibility code is included. Timed and counted
-access remain local credential constraints; remote status/policy operations
-and mutual authentication are deliberately absent from this minimal profile.
+Its TOTP wire bytes and C/mobile entry points remain available. The original
+crate names again denote the fully supported secure v2 scheme. New projects
+should use these explicit namespaces and avoid mixing the schemes' credentials,
+clocks, counters or transport codecs.
 
 ## Verification
 
-`cargo test --workspace` checks all RFC SHA-256 vectors, strict packet parsing,
-ABI buffers, one-time use across reboot and time-window boundaries, persistent
-attempt limits, clock rollback, policy constraints, storage failure, and
-actuator failure. An integration test sends a BLE request through the lock and
-replays it over NFC after restarting the runtime.
+`cargo test --workspace` covers the retained secure suite and the TOTP suite,
+including secure fixed wire bytes, Noise sessions, signed grants/policies,
+trust/rotation, transport framing, RFC TOTP vectors, one-time use across reboot
+and BLE/NFC, persistent throttling, clock rollback and ambiguous commit/actuator
+failures. A combined-ABI test exercises both paths and rejects a TOTP packet in
+a secure session. Build checks cover each restricted FFI feature set.
 
-`devenv shell -- no-std-check` runs runtime tests with default features disabled
-and checks the runtime libraries for `thumbv7em-none-eabihf` without a custom RNG
-configuration. This is a library compile check, not a linked/running firmware
-image; brownout durability, radio wakeups, physical actuation and RTC drift need
-verification on the selected hardware.
+`devenv shell -- no-std-check` runs runtime tests without default features,
+checks secure libraries for `thumbv7em-none-eabihf` using the existing custom RNG
+setting, and checks `openlock-totp` separately without that setting. These checks
+do not link firmware or measure physical brownout recovery, RAM/flash or power.

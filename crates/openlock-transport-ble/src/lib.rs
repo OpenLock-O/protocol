@@ -1,42 +1,169 @@
-//! One v3 message per GATT write/notification, including at the default MTU.
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use openlock_transport::MAX_FRAME_MESSAGE;
-use openlock_transport::{validate_message, FrameCodec, TransportError};
+extern crate alloc;
+
+use alloc::{vec, vec::Vec};
+use openlock_transport::{FrameCodec, TransportError};
+pub const HEADER_SIZE: usize = 8;
+pub const MAX_FRAME_MESSAGE: usize = 4096;
 pub const DEFAULT_ATT_MTU: usize = 23;
 pub const MIN_ATT_MTU: usize = DEFAULT_ATT_MTU;
+pub const MAX_ATTRIBUTE_VALUE: usize = 512;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FragmentHeader {
+    pub message_id: u16,
+    pub offset: u16,
+    pub total: u16,
+}
 
 pub struct BleCodec {
     att_mtu: usize,
+    next_id: u16,
+    message_id: Option<u16>,
+    total: usize,
+    bytes: Vec<u8>,
+    received: Vec<bool>,
 }
 impl Default for BleCodec {
     fn default() -> Self {
         Self {
             att_mtu: DEFAULT_ATT_MTU,
+            next_id: 1,
+            message_id: None,
+            total: 0,
+            bytes: Vec::new(),
+            received: Vec::new(),
         }
     }
 }
 impl BleCodec {
+    /// Create a codec for a negotiated ATT MTU. The 3-byte ATT/L2CAP overhead
+    /// is reserved automatically; the custom fragment header consumes another
+    /// `HEADER_SIZE` bytes from each characteristic write.
     pub fn with_mtu(att_mtu: usize) -> Result<Self, TransportError> {
         if att_mtu < MIN_ATT_MTU {
             return Err(TransportError::InvalidLength);
         }
-        Ok(Self { att_mtu })
+        Ok(Self {
+            att_mtu,
+            ..Self::default()
+        })
     }
     pub fn set_mtu(&mut self, att_mtu: usize) -> Result<(), TransportError> {
-        *self = Self::with_mtu(att_mtu)?;
+        if att_mtu < MIN_ATT_MTU {
+            return Err(TransportError::InvalidLength);
+        }
+        self.att_mtu = att_mtu;
         Ok(())
     }
     pub fn mtu(&self) -> usize {
         self.att_mtu
     }
+    fn payload_capacity(&self) -> usize {
+        (self.att_mtu - 3).min(MAX_ATTRIBUTE_VALUE) - HEADER_SIZE
+    }
+    fn frame(header: FragmentHeader, payload: &[u8]) -> Result<Vec<u8>, TransportError> {
+        if header.total == 0
+            || header.total as usize > MAX_FRAME_MESSAGE
+            || header.offset as usize + payload.len() > header.total as usize
+            || payload.len() > u16::MAX as usize
+        {
+            return Err(TransportError::OutOfBounds);
+        }
+        let mut out = Vec::with_capacity(HEADER_SIZE + payload.len());
+        out.extend_from_slice(&header.message_id.to_le_bytes());
+        out.extend_from_slice(&header.offset.to_le_bytes());
+        out.extend_from_slice(&header.total.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        Ok(out)
+    }
+    fn parse(att_mtu: usize, frame: &[u8]) -> Result<(FragmentHeader, &[u8]), TransportError> {
+        if frame.len() < HEADER_SIZE {
+            return Err(TransportError::TooShort);
+        }
+        let h = FragmentHeader {
+            message_id: u16::from_le_bytes([frame[0], frame[1]]),
+            offset: u16::from_le_bytes([frame[2], frame[3]]),
+            total: u16::from_le_bytes([frame[4], frame[5]]),
+        };
+        let payload = &frame[HEADER_SIZE..];
+        let payload_len = payload.len();
+        let declared_len = u16::from_le_bytes([frame[6], frame[7]]) as usize;
+        if declared_len == 0
+            || declared_len != payload_len
+            || payload_len > (att_mtu - 3).min(MAX_ATTRIBUTE_VALUE) - HEADER_SIZE
+        {
+            return Err(TransportError::InvalidLength);
+        }
+        if h.total == 0
+            || h.total as usize > MAX_FRAME_MESSAGE
+            || h.offset as usize + payload_len > h.total as usize
+        {
+            return Err(TransportError::OutOfBounds);
+        }
+        Ok((h, payload))
+    }
 }
 impl FrameCodec for BleCodec {
-    fn encode<'a>(&self, message: &'a [u8]) -> Result<&'a [u8], TransportError> {
-        validate_message(message)
+    type Error = TransportError;
+    fn encode(&mut self, message: &[u8]) -> Result<Vec<Vec<u8>>, Self::Error> {
+        if message.is_empty() || message.len() > MAX_FRAME_MESSAGE {
+            return Err(TransportError::TooLarge);
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        let max = self.payload_capacity();
+        let total = message.len() as u16;
+        message
+            .chunks(max)
+            .enumerate()
+            .map(|(i, p)| {
+                Self::frame(
+                    FragmentHeader {
+                        message_id: id,
+                        offset: (i * max) as u16,
+                        total,
+                    },
+                    p,
+                )
+            })
+            .collect()
     }
-    fn decode<'a>(&self, frame: &'a [u8]) -> Result<&'a [u8], TransportError> {
-        validate_message(frame)
+    fn push(&mut self, frame: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+        let (h, payload) = Self::parse(self.att_mtu, frame)?;
+        if self.message_id.is_none() {
+            self.message_id = Some(h.message_id);
+            self.total = h.total as usize;
+            self.bytes = vec![0; self.total];
+            self.received = vec![false; self.total];
+        } else if self.message_id != Some(h.message_id) {
+            return Err(TransportError::Busy);
+        } else if self.total != h.total as usize {
+            return Err(TransportError::Conflict);
+        }
+        for (i, byte) in payload.iter().enumerate() {
+            let at = h.offset as usize + i;
+            if self.received[at] && self.bytes[at] != *byte {
+                return Err(TransportError::Conflict);
+            }
+            self.bytes[at] = *byte;
+            self.received[at] = true;
+        }
+        if self.received.iter().all(|v| *v) {
+            let result = core::mem::take(&mut self.bytes);
+            self.reset();
+            Ok(Some(result))
+        } else {
+            Ok(None)
+        }
+    }
+    fn reset(&mut self) {
+        self.message_id = None;
+        self.total = 0;
+        self.bytes.clear();
+        self.received.clear();
     }
 }
 
@@ -44,21 +171,40 @@ impl FrameCodec for BleCodec {
 mod tests {
     use super::*;
     #[test]
-    fn complete_messages_fit_the_default_mtu_without_extra_headers() {
-        let codec = BleCodec::default();
-        for size in [15, 18, 20] {
-            let bytes = [7; 20];
-            let frame = codec.encode(&bytes[..size]).unwrap();
-            assert_eq!(frame.len(), size);
-            assert!(frame.len() <= codec.mtu() - 3);
-            assert_eq!(codec.decode(frame).unwrap(), &bytes[..size]);
+    fn round_trip_out_of_order_and_duplicate() {
+        let mut tx = BleCodec::default();
+        let frames = tx.encode(&vec![3; 400]).unwrap();
+        let mut rx = BleCodec::default();
+        assert_eq!(rx.push(&frames[1]).unwrap(), None);
+        assert_eq!(rx.push(&frames[1]).unwrap(), None); // identical duplicate
+        assert_eq!(rx.push(&frames[0]).unwrap(), None);
+        let mut result = None;
+        for frame in frames.into_iter().skip(2) {
+            result = rx.push(&frame).unwrap().or(result);
         }
-        assert_eq!(codec.encode(&[]), Err(TransportError::InvalidLength));
-        assert_eq!(codec.encode(&[0; 21]), Err(TransportError::TooLarge));
-        assert!(BleCodec::with_mtu(22).is_err());
-        assert_eq!(
-            BleCodec::with_mtu(517).unwrap().encode(&[0; 21]),
-            Err(TransportError::TooLarge)
-        );
+        assert_eq!(result, Some(vec![3; 400]));
+    }
+    #[test]
+    fn conflicting_fragment_is_rejected() {
+        let mut tx = BleCodec::default();
+        let mut frames = tx.encode(&vec![4; 400]).unwrap();
+        let mut rx = BleCodec::default();
+        assert_eq!(rx.push(&frames[0]).unwrap(), None);
+        frames[0][8] ^= 1;
+        assert_eq!(rx.push(&frames[0]), Err(TransportError::Conflict));
+    }
+
+    #[test]
+    fn negotiated_mtu_bounds_characteristic_writes() {
+        let mut tx = BleCodec::with_mtu(185).unwrap();
+        let frames = tx.encode(&vec![9; 400]).unwrap();
+        assert!(frames.iter().all(|f| f.len() <= 182));
+        let mut tx = BleCodec::with_mtu(517).unwrap();
+        let frames = tx.encode(&vec![9; 600]).unwrap();
+        assert!(frames.iter().all(|f| f.len() <= MAX_ATTRIBUTE_VALUE));
+        assert!(matches!(
+            BleCodec::with_mtu(10),
+            Err(TransportError::InvalidLength)
+        ));
     }
 }
