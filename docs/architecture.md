@@ -1,63 +1,128 @@
-# OpenLock v2 architecture
+# OpenLock v3 architecture
 
-OpenLock v2 is a Cargo workspace with one protocol state machine and multiple
-byte transports. `openlock-protocol::Session` owns Noise handshake and request
-encoding. A transport codec converts complete protocol messages into fragments
-for its medium.
-
-The NFC bootstrap record is a signed CBOR device-key record. It can be stored
-in a passive NDEF tag, verified using the configured issuer root, and placed in
-a local trust store. Full sessions use the same Noise IK profile over BLE GATT
-or NFC ISO-DEP/APDU. Rust does not access platform hardware; Swift and Kotlin
-supply reader, card-emulation, BLE callbacks and persistence.
-
-The v2 complete packet limit is 4096 bytes. BLE uses bounded out-of-order
-fragments sized from the negotiated ATT MTU (default 23 bytes). ISO-DEP uses a
-sequence byte and a two-byte total length. Both codecs reject conflicting
-duplicates, truncation, overflow and sequence errors.
-
-Device X25519 keys are used for Noise identity and are not used to sign key
-updates. Device records and rotation records use an independent Ed25519 key or
-the configured issuer key. Key versions are monotonic and old versions cannot
-replace a newer record.
-
-## Embedded integration
-
-The runtime libraries support `no_std + alloc` with default features disabled.
-This retains their existing `Vec`, `Box`, `BTreeMap` and `BTreeSet` interfaces,
-packet limits, v2 wire encoding and authorization behavior. The firmware owns
-the global allocator and panic handler, including allocation failure behavior;
-the libraries do not install either. This configuration does not imply a fixed
-RAM budget or a heap-free implementation. Issuer and FFI remain host-side crates.
-
-Noise still uses `Noise_IK_25519_ChaChaPoly_SHA256`. Its ephemeral keys are
-generated through `getrandom` 0.3. For a bare-metal build, select the custom
-backend in the firmware's `.cargo/config.toml`:
-
-```toml
-[target.thumbv7em-none-eabihf]
-rustflags = ['--cfg', 'getrandom_backend="custom"']
-```
-
-The final firmware must depend directly on the same `getrandom` 0.3 version
-and export exactly one unmangled Rust-ABI symbol named
-`__getrandom_v03_custom` using `#[unsafe(no_mangle)]`. Its signature is:
+V3 fully includes the secure v2 implementation and offers a separate TOTP
+implementation. The original secure runtime crates retain their source APIs and
+wire behavior; `openlock-totp` is an independent crate for constrained devices.
+Both are members of the same version 0.3 Cargo workspace.
 
 ```text
-unsafe fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error>
+Trusted deployment configuration
+  |
+  +-- Secure scheme --> original openlock-* crates
+  |                    Noise / COSE / policy / trust / fragmentation
+  |                    v2 wire and APIs remain compatible
+  |
+  +-- TOTP scheme ----> openlock-totp
+                       HMAC / durable one-time use / local policy
+                       small plaintext packets, no heap or RNG
+
+Host-side openlock-ffi (default: both)
+  +-- original openlock_session_* and credential-ID ABI
+  +-- stateless TOTP generation/encoding/decoding ABI
 ```
 
-On success, the backend must initialize all `len` bytes at `dest` with
-cryptographically secure random data. The destination may initially be
-uninitialized; it must not be read before being written. Report entropy source
-failure as `getrandom::Error`, rather than returning predictable bytes. OpenLock
-maps RNG failures to its existing `Error::Noise` and closes the channel when a
-Noise read or write fails. Backend selection is an application build setting,
-not an OpenLock API or a new protocol capability.
+There is no authentication downgrade or automatic fallback between paths. Both
+library features being present does not enable TOTP access on a device: the
+host must explicitly provision and enable that scheme. The
+[protocol overview](protocol.md) defines selection and authorization isolation.
 
-BLE/NFC I/O, trusted time, durable storage and actuator integration remain the
-application's responsibility. `devenv shell -- no-std-check` runs host tests
-without default features and compiles the runtime libraries for
-`thumbv7em-none-eabihf` using the custom backend. The compile check does not
-provide that symbol or a global allocator, and does not link or execute a
-firmware image.
+## Secure v2 integration
+
+The seven existing runtime crates (`openlock-types`, `openlock-crypto`,
+`openlock-protocol`, `openlock-core`, `openlock-transport`,
+`openlock-transport-ble`, `openlock-transport-nfc`) retain the complete v2
+implementation and API. This includes Noise sessions, signed grants, policy
+updates, trust/rotation, signed NFC bootstrap and bounded fragmentation.
+
+They support `no_std + alloc` with default features disabled. Firmware supplies
+a global allocator, panic handler, secure RNG backend for Noise ephemeral keys,
+and its BLE/NFC, clock, storage and actuator integration. The existing
+[secure embedded integration contract](architecture-v2.md#embedded-integration)
+is retained in full. Secure `PROTOCOL_VERSION` and Noise prologue remain at v2,
+so old clients and credential material remain usable.
+
+## Independent TOTP integration
+
+TOTP-only firmware needs one dependency:
+
+```toml
+[dependencies]
+openlock-totp = { version = "0.3", default-features = false }
+```
+
+For a checkout-based build, use `path = ".../crates/openlock-totp"` instead of
+a registry version. The crate is not dependent on any secure runtime crate and
+has no Noise, Ed25519, X25519, CBOR, allocator or getrandom dependency. Its
+modules are `types`, `crypto`, `core`, `protocol`, `transport::{ble,nfc}` and
+`provisioning`. See [TOTP firmware integration](architecture-totp.md).
+
+`openlock_totp::core::LockState` enforces the durable replay and attempt budget
+rules. TOTP primitives and wire parsers alone do not authorize opening. Keys,
+usage and policy types belong to the TOTP namespace; v2 `Grant`, `Issuer`,
+`LockState`, `CredentialId` and error types retain their original meanings.
+`openlock_issuer::totp` re-exports the TOTP local provisioning helpers for host
+applications alongside the original signing issuer.
+
+## C and mobile bindings
+
+The default `openlock-ffi` exports both schemes. The original `openlock_session_*`
+and `openlock_credential_id` symbols and layouts are retained. The added
+`openlock_totp`, `openlock_make_unlock`, `openlock_encode_unlock`,
+`openlock_decode_unlock`, `openlock_encode_response` and
+`openlock_decode_response` symbols are TOTP-only helpers. Both header copies
+contain the same declarations; C ABI structs are native layouts, not packets.
+
+Feature selection can limit the exported implementation:
+
+```sh
+# Combined (backward-compatible default):
+cargo build -p openlock-ffi
+# Secure only:
+cargo build -p openlock-ffi --no-default-features --features secure
+# TOTP only, excluding secure crypto/session dependencies:
+cargo build -p openlock-ffi --no-default-features --features totp
+```
+
+Headers declare both schemes. Consumers of a restricted build must use only its
+selected symbols. FFI remains host-side; embedded TOTP firmware uses
+`openlock-totp` directly. FFI feature selection is a build choice, not a device
+security negotiation mechanism.
+
+Swift and Kotlin expose the original `OpenLockSession` APIs and the added
+stateless `OpenLock` TOTP helpers. The combined wrappers should link the default
+combined FFI library. JNI exports both sets of methods in `openlock_jni`, linked
+to `openlock_ffi`; both Kotlin entry points load the JNI shim. Applications own
+platform I/O, key storage and explicit scheme selection.
+
+## Compatibility with the TOTP proposal
+
+The former replacement-only proposal's Rust implementation moved as follows:
+
+| Proposal crate | Final optional scheme module |
+| --- | --- |
+| `openlock-types` | `openlock_totp::types` |
+| `openlock-crypto` | `openlock_totp::crypto` |
+| `openlock-core` | `openlock_totp::core` |
+| `openlock-protocol` | `openlock_totp::protocol` |
+| `openlock-transport` | `openlock_totp::transport` |
+| `openlock-transport-ble` / `openlock-transport-nfc` | `openlock_totp::transport::ble` / `openlock_totp::transport::nfc` |
+| local TOTP issuer | `openlock_totp::provisioning` or `openlock_issuer::totp` |
+
+Its TOTP wire bytes and C/mobile entry points remain available. The original
+crate names again denote the fully supported secure v2 scheme. New projects
+should use these explicit namespaces and avoid mixing the schemes' credentials,
+clocks, counters or transport codecs.
+
+## Verification
+
+`cargo test --workspace` covers the retained secure suite and the TOTP suite,
+including secure fixed wire bytes, Noise sessions, signed grants/policies,
+trust/rotation, transport framing, RFC TOTP vectors, one-time use across reboot
+and BLE/NFC, persistent throttling, clock rollback and ambiguous commit/actuator
+failures. A combined-ABI test exercises both paths and rejects a TOTP packet in
+a secure session. Build checks cover each restricted FFI feature set.
+
+`devenv shell -- no-std-check` runs runtime tests without default features,
+checks secure libraries for `thumbv7em-none-eabihf` using the existing custom RNG
+setting, and checks `openlock-totp` separately without that setting. These checks
+do not link firmware or measure physical brownout recovery, RAM/flash or power.

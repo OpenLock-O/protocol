@@ -4,7 +4,7 @@ class OpenLockException(val code: Int) : RuntimeException("OpenLock error $code"
 /** Thin byte-oriented wrapper; Android NFC/BLE callbacks remain platform code. */
 class OpenLockSession private constructor(private var handle: Long) : AutoCloseable {
     companion object {
-        init { System.loadLibrary("openlock_ffi") }
+        init { System.loadLibrary("openlock_jni") }
         @JvmStatic private external fun newInitiator(privateKey: ByteArray, lockPublic: ByteArray, capabilities: Long): Long
         @JvmStatic private external fun free(handle: Long)
         fun initiator(privateKey: ByteArray, lockPublic: ByteArray, capabilities: Long): OpenLockSession {

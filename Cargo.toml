@@ -10,15 +10,17 @@ members = [
   "crates/openlock-transport-nfc",
   "crates/openlock-issuer",
   "crates/openlock-ffi",
+  "crates/openlock-totp",
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "LGPL-3.0-or-later"
 rust-version = "1.81"
 
 [workspace.dependencies]
+openlock-totp = { path = "crates/openlock-totp", default-features = false }
 openlock-types = { path = "crates/openlock-types", default-features = false }
 openlock-crypto = { path = "crates/openlock-crypto", default-features = false }
 openlock-core = { path = "crates/openlock-core", default-features = false }
@@ -39,3 +41,7 @@ snow = { version = "0.10", default-features = false, features = [
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 thiserror = { version = "2.0.20", default-features = false }
 rand_core = { version = "0.6", default-features = false }
+hmac = { version = "0.12", default-features = false }
+subtle = { version = "2.6", default-features = false }
+# Keep the Rust 1.81 baseline; zeroize 1.9 requires Rust 1.85.
+zeroize = { version = "~1.8.2", default-features = false }

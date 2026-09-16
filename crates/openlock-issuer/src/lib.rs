@@ -1,5 +1,9 @@
 //! Offline administrator-side credential issuing helpers.
 
+/// Local provisioning helpers for the optional TOTP scheme. The root Issuer
+/// retains the secure v2 signing, revocation, and key-rotation APIs.
+pub use openlock_totp::provisioning as totp;
+
 use ed25519_dalek::SigningKey;
 use openlock_core::{
     sign_grant, sign_policy, CredentialId, Grant, LockId, PolicyUpdate, SubjectKey,

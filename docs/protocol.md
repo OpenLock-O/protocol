@@ -1,133 +1,77 @@
-# OpenLock Protocol v2
+# OpenLock v3 protocol family
 
-This document is the wire contract implemented by `openlock-protocol`.
-BLE GATT and NFC ISO-DEP are byte transports: a transport MUST deliver one
-complete protocol message to `Session::receive`, and MUST send each returned
-byte string without modification.
+OpenLock v3 is a superset of v2: the complete secure v2 scheme remains available,
+and plaintext TOTP is an additional optional scheme. The Cargo release version
+is 0.3. Scheme selection is a trusted deployment choice, not unauthenticated
+capability negotiation or fallback after a failed handshake.
 
-## Encoding
+## Scheme contracts and compatibility
 
-Every message is a definite, canonical CBOR array of exactly six items:
+| Scheme | Wire format | Contract | Runtime |
+| --- | --- | --- | --- |
+| Secure (v2 compatible) | Version 2, profile 1, canonical CBOR + Noise IK | [Complete v2 wire contract](protocol-v2.md) | Existing `openlock-protocol::Session` and companion crates |
+| Plaintext TOTP (optional) | Version 3, fixed binary, 18-byte request / 15-byte response | [TOTP wire contract](protocol-totp.md) | Independent `openlock-totp` crate |
 
-```text
-[version, profile, kind, request_id, capabilities, payload]
-```
+The v3 family does **not** rewrite secure packet versions from 2 to 3. Keeping
+`openlock_types::PROTOCOL_VERSION = 2`, the Noise prologue
+`OpenLock/v2/profile1`, the CBOR layouts, signature inputs and error values is
+necessary for v2 interoperability. `openlock_totp::types::PROTOCOL_VERSION = 3`
+identifies only the new TOTP wire scheme. These are separate namespaces; equal
+numeric profile IDs do not make their formats or credentials interchangeable.
 
-| item | type | value and meaning |
-| --- | --- | --- |
-| `version` | unsigned integer | `2` (`PROTOCOL_VERSION`) |
-| `profile` | unsigned integer | `1` (`PROFILE`) |
-| `kind` | unsigned integer | `0` handshake, `1` request, `2` response |
-| `request_id` | unsigned integer | `0` for handshake; non-zero for encrypted messages |
-| `capabilities` | unsigned integer | bit mask of `CAP_UNLOCK=1`, `CAP_STATUS=2`, `CAP_POLICY=4` |
-| `payload` | byte string | Noise message; never empty; complete packet <= 4096 bytes |
+All v2 capabilities remain: authenticated/encrypted sessions, holder-bound
+signed grants, Unlock, Status, ApplyPolicy, epochs and revocation, optional
+validity/use limits, device trust and monotonic key rotation, signed NFC
+bootstrap, and BLE/NFC fragmentation. The original root Rust APIs and C session
+ABI remain available, as do the Swift/Kotlin session wrappers. A secure-only
+installation does not need new keys or any TOTP enrollment.
 
-Integers MUST be non-negative and minimally encoded. Indefinite arrays, maps,
-strings, tags, floating point values, trailing bytes and unknown capability bits
-are rejected. Handshake messages MUST have `request_id=0` and
-`capabilities=0`. Requests and responses MUST have a non-zero request ID and at
-least one known capability bit.
+## Explicit selection and isolation
 
-## Noise session
+A host MUST associate endpoints, provisioned credentials and authorization
+policy with their intended scheme. An endpoint may support both only if trusted
+local configuration explicitly enables both; the host then routes to the
+appropriate parser and authorization store. Separate characteristics/APDU
+routes are a straightforward way to keep this selection explicit.
 
-The session uses `Noise_IK_25519_ChaChaPoly_SHA256` with prologue
-`OpenLock/v2/profile1`. The initiator is constructed with its X25519 private key
-and the responder's static public key. The responder is constructed with its
-private key. The authenticated responder static key is exposed as `SubjectKey`.
+A failed secure handshake, signature check, authorization check or unsupported
+packet MUST NOT trigger a retry as TOTP. Neither a public discovery record nor
+an unauthenticated response may enable a scheme or relax the expected one.
+Applications MUST NOT infer that a TOTP code authenticates a secure session or
+that a secure grant can be interpreted as a TOTP secret.
 
-The only valid sequence is:
+Secure and TOTP parsers reject each other's messages. The implementation has
+no automatic cross-scheme dispatcher or fallback. The C ABI has distinct entry
+points: `openlock_session_*` for secure sessions and `openlock_make_unlock` /
+`openlock_decode_response` for TOTP. Mobile callers explicitly choose
+`OpenLockSession` or the `OpenLock` TOTP helpers.
 
-```text
-initiator.start() -> handshake 1
-responder.receive(handshake 1) -> handshake 2 + HandshakeComplete
-initiator.receive(handshake 2) -> HandshakeComplete
-initiator.send(request) -> responder.receive(request)
-responder.respond(request_id, response) -> initiator.receive(response)
-```
+A v2 signed policy update affects secure credentials only. TOTP credentials are
+installed/revoked through trusted local management. A user with credentials
+in both schemes must be revoked in both stores by the management layer. Usage
+counters and TOTP consumption records are independent and cannot be reset by
+switching transport or scheme. Adding an authorized TOTP credential provides a
+plaintext access path with its own security properties; it does not inherit
+the confidentiality or peer authentication of the secure path.
 
-Handshake packets are unencrypted Noise handshake messages. Requests and
-responses are encrypted Noise transport messages. For an encrypted message,
-the plaintext is itself a four-item CBOR array
-`[kind, request_id, capabilities, body]`; the receiver MUST compare these
-fields with the outer envelope before parsing `body`. This authenticated copy
-binds all outer metadata to the Noise AEAD and makes header tampering fail.
+## TOTP one-time use
 
-A session is one-directional:
-the initiator sends requests and receives responses; the responder receives
-requests and sends responses. A request ID is unique within a session, and a
-response is accepted only for an outstanding request. At most
-`MAX_PENDING_REQUESTS` (1024) requests may be outstanding. After an
-authentication or protocol error, the application should discard the session
-rather than continue with it.
+The optional scheme uses RFC 6238 HMAC-SHA-256, a 32-byte unique key per
+`(lock, credential)`, a 30-second period, eight digits and ±1-step tolerance.
+The lock MUST persist consumption before actuation and reject consumed or
+older steps, including across reconnects, transport changes and reboot. The
+lock-wide rate limit also survives restart. Clock and storage failures reject
+access. Full rules and vectors are in [the TOTP contract](protocol-totp.md).
 
-The capability mask in an encrypted request identifies the sender's supported
-operations. The command's capability MUST be present in that mask and in the
-receiver's configured mask. Responses carry the responder's configured mask.
+## Discovery and transports
 
-## Request payloads
+Secure NFC retains its signed CBOR MIME record
+`application/vnd.openlock.bootstrap+cbor`, issuer trust and device keys. TOTP
+uses the distinct public hint `application/vnd.openlock.bootstrap`, containing
+only its version/profile and lock ID. The unsigned TOTP hint cannot replace a
+secure trust record. Both records remain supported in their separate modules.
 
-After the authenticated four-item envelope is checked, its `body` is a
-canonical CBOR array:
-
-```text
-Unlock       = [0, credential_cose, requested_use]
-Status       = [1, credential_cose, requested_use]
-ApplyPolicy  = [2, policy_cose]
-```
-
-`credential_cose` and `policy_cose` are non-empty byte strings, each at most
-4096 bytes. `requested_use` is either `null` or an unsigned 32-bit integer. A
-use number is required for counted grants and MUST be omitted for grants that
-do not have a maximum use count. The signed COSE objects are verified by the
-authorization layer, not by the transport state machine.
-
-## Response payloads
-
-Responses are canonical CBOR arrays:
-
-```text
-[0]                 ; Unlocked
-[1, epoch, version] ; Status
-[2]                 ; PolicyApplied
-[3, next_use]       ; AlreadyConsumed
-[4, error_code]     ; Rejected
-```
-
-`epoch` and `version` are unsigned 64-bit values. `next_use` and
-`error_code` are unsigned 32-bit values. `error_code` uses the stable values
-returned by `Error::code()`.
-
-## Authorization and persistence
-
-The lock verifies a grant signature, lock ID, epoch, rights, revocation, time
-window and Noise peer key. For a counted grant, the increment is committed via
-`PersistentState::commit` before the actuator callback. A stale use number
-returns `AlreadyConsumed` and cannot cause a second actuator event. An actuator
-failure is reported as `ActuatorFailed`; the durable usage increment is kept.
-
-## NFC bootstrap
-
-The NDEF MIME type is `application/vnd.openlock.bootstrap+cbor`. Its payload is
-the canonical CBOR array:
-
-```text
-[2, device_id16, key_id_u32, key_version_u32, x25519_public32,
- rotation_public32, capabilities_u64, issuer_key_id_u32, signature]
-```
-
-The record is signed with the configured Ed25519 issuer key. X25519 and Ed25519
-keys are independent. `key_version` is non-zero and increases monotonically;
-unknown capabilities and invalid public keys are rejected. A trust store may
-also pin a device key directly after local provisioning. Key rotation enforces
-the old key ID, monotonic version and activation interval before committing the
-new record.
-
-ISO-DEP fragments contain `[sequence_u8, total_length_be_u16, payload]`, with a
-maximum payload of 240 bytes and total message size of 4096 bytes. Fragments
-must arrive in sequence and are reassembled before protocol decoding.
-
-BLE fragment writes are bounded by the negotiated ATT MTU. `BleCodec` defaults
-to the mandatory 23-byte ATT MTU and reserves the 3-byte ATT/L2CAP overhead and
-its 8-byte fragment header, leaving 12 bytes of message data per write. Hosts
-MUST call `BleCodec::with_mtu` or `set_mtu` after MTU negotiation when a larger
-value is available; a frame never exceeds `att_mtu - 3` bytes.
+Secure BLE/ISO-DEP retains v2 framing and limits. TOTP sends one complete small
+message per characteristic write/notification or APDU data field. Hosts select
+the corresponding codec; a single TOTP frame is never fed through the v2
+fragment parser as a recovery strategy.
