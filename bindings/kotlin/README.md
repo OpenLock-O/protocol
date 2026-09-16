@@ -1,18 +1,18 @@
-# Kotlin binding (OpenLock v3)
+# OpenLock Kotlin binding
 
-V3 contains both the fully supported secure v2 scheme and optional plaintext
-TOTP. Choose the scheme explicitly through trusted application/device policy.
-Do not fall back to TOTP when a secure session fails.
+The Kotlin binding provides encrypted-session and TOTP authentication through
+the same native library. Choose the mode through trusted application/device
+configuration; a failed session must not trigger automatic fallback to TOTP.
 
-`OpenLockSession` retains the v2 API:
+Use `OpenLockSession` to own an encrypted-session handle:
 
 ```kotlin
 OpenLockSession.initiator(privateKey, lockPublicKey, capabilities).use { session ->
-    // Existing v2 session handle ownership; platform I/O remains host-owned.
+    // Platform BLE/NFC I/O remains application-owned.
 }
 ```
 
-`OpenLock` is the separate stateless TOTP API:
+Use `OpenLock` to generate and parse complete TOTP messages:
 
 ```kotlin
 val request = OpenLock.makeUnlock(secret, credentialId = 7L, unixSeconds = now)
@@ -34,8 +34,9 @@ make the library available to the Android linker, and build the JNI shim in
 Both entry points load `openlock_jni`, which exports the two method sets and
 links Rust. The header path points to the canonical `include/openlock.h`.
 
-BLE/NFC callbacks, secure key storage and explicit scheme selection belong to
-the application. Lock firmware must enforce each scheme's authorization and
-persistence contract; packet decoding is not authorization. See the
-[v3 protocol overview](../../docs/protocol.md) and
-[TOTP contract](../../docs/protocol-totp.md).
+BLE/NFC callbacks, key storage and authentication mode selection belong to the
+application. Lock firmware must enforce the mode's authorization and persistence
+contract; packet decoding is not authorization. See the
+[protocol specification](../../docs/protocol.md),
+[TOTP contract](../../docs/protocol.md#totp) and
+[architecture guide](../../docs/architecture.md).

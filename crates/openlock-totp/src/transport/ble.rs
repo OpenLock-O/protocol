@@ -1,4 +1,4 @@
-//! One v3 message per GATT write/notification, including at the default MTU.
+//! One TOTP message per GATT write/notification, including at the default MTU.
 
 pub use crate::transport::MAX_FRAME_MESSAGE;
 use crate::transport::{validate_message, FrameCodec, TransportError};

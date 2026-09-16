@@ -1,128 +1,262 @@
-# OpenLock v3 architecture
+# OpenLock architecture
 
-V3 fully includes the secure v2 implementation and offers a separate TOTP
-implementation. The original secure runtime crates retain their source APIs and
-wire behavior; `openlock-totp` is an independent crate for constrained devices.
-Both are members of the same version 0.3 Cargo workspace.
+OpenLock separates platform I/O, authentication, authorization and actuation.
+A host selects **encrypted sessions**, **TOTP**, or both through trusted device
+configuration, and supplies the BLE/NFC stack, credential storage, required
+clock sources and actuator callbacks. Both modes follow the shared access
+rules in the [protocol specification](protocol.md).
 
 ```text
-Trusted deployment configuration
+Application and trusted device configuration
   |
-  +-- Secure scheme --> original openlock-* crates
-  |                    Noise / COSE / policy / trust / fragmentation
-  |                    v2 wire and APIs remain compatible
-  |
-  +-- TOTP scheme ----> openlock-totp
-                       HMAC / durable one-time use / local policy
-                       small plaintext packets, no heap or RNG
+  +-- BLE / NFC endpoint --> configured authentication and authorization
+  |                           |
+  |                           +-- Encrypted session: Noise + signed grant
+  |                           +-- TOTP: shared key + one-time code
+  |                           |
+  +-- Durable storage <-------+-- credential policy and consumption
+                              |
+                              +-- authorized actuator callback
 
-Host-side openlock-ffi (default: both)
-  +-- original openlock_session_* and credential-ID ABI
-  +-- stateless TOTP generation/encoding/decoding ABI
+Client bindings: openlock-ffi / Swift / Kotlin
+  +-- OpenLockSession and openlock_session_*: encrypted sessions
+  +-- OpenLock and stateless C helpers: TOTP
 ```
 
-There is no authentication downgrade or automatic fallback between paths. Both
-library features being present does not enable TOTP access on a device: the
-host must explicitly provision and enable that scheme. The
-[protocol overview](protocol.md) defines selection and authorization isolation.
+Library feature selection controls what is compiled. Device configuration
+controls which modes and credentials may authorize access. Neither a discovery
+record nor an authentication failure can change that configuration. Management
+coordinates revocation if a holder has credentials in both modes; each mode
+owns its credential types, policy and consumption records.
 
-## Secure v2 integration
+## Runtime components
 
-The seven existing runtime crates (`openlock-types`, `openlock-crypto`,
-`openlock-protocol`, `openlock-core`, `openlock-transport`,
-`openlock-transport-ble`, `openlock-transport-nfc`) retain the complete v2
-implementation and API. This includes Noise sessions, signed grants, policy
-updates, trust/rotation, signed NFC bootstrap and bounded fragmentation.
+| Responsibility | Encrypted sessions | TOTP |
+| --- | --- | --- |
+| Domain types | `openlock-types` | `openlock_totp::types` |
+| Cryptography | `openlock-crypto` | `openlock_totp::crypto` |
+| Authorization | `openlock-core` | `openlock_totp::core` |
+| Wire encoding | `openlock-protocol` | `openlock_totp::protocol` |
+| BLE / NFC transport | `openlock-transport` and its BLE/NFC adapters | `openlock_totp::transport::{ble,nfc}` |
+| Provisioning | `openlock_issuer::Issuer` | `openlock_totp::provisioning` or `openlock_issuer::totp` |
 
-They support `no_std + alloc` with default features disabled. Firmware supplies
-a global allocator, panic handler, secure RNG backend for Noise ephemeral keys,
-and its BLE/NFC, clock, storage and actuator integration. The existing
-[secure embedded integration contract](architecture-v2.md#embedded-integration)
-is retained in full. Secure `PROTOCOL_VERSION` and Noise prologue remain at v2,
-so old clients and credential material remain usable.
+The session implementation uses Noise, signed grants, policy updates,
+trust/rotation and bounded fragmentation. Its seven runtime crates support
+`no_std + alloc`. `openlock-totp` is a self-contained crate supporting `no_std`
+without an allocator or runtime RNG, so constrained firmware can depend on it
+alone. Issuer and FFI are host-side crates.
 
-## Independent TOTP integration
+Disable default features on every runtime dependency used by firmware. Cargo
+unifies features across dependencies, so another dependency enabling `std` can
+restore it for an affected crate. Firmware owns the panic handler and all
+hardware integration. Library configuration alone does not establish a fixed
+RAM/flash budget or battery life; measure radio, RTC, NVM and actuator costs on
+the selected board.
 
-TOTP-only firmware needs one dependency:
+## Firmware integration
+
+### Encrypted sessions
+
+`openlock-protocol::Session` owns the Noise handshake and message state machine.
+Transport codecs convert complete messages to bounded BLE or ISO-DEP fragments
+and reassemble them before parsing. The complete-message limit is 4096 bytes.
+BLE uses the negotiated ATT MTU (default 23); ISO-DEP uses a sequence byte and
+two-byte total length. Both reject conflicting data and invalid framing.
+
+Signed CBOR device records can be read from passive NDEF tags, verified against
+the configured issuer and imported into a trust store. X25519 keys identify
+Noise peers; separate Ed25519 keys sign device records and rotation updates.
+Key versions are monotonic. The [wire specification](protocol.md#encrypted-sessions)
+describes exact formats, grants, policies and the request/response sequence.
+
+The libraries use `Vec`, `Box`, `BTreeMap` and `BTreeSet`; firmware must provide
+a global allocator, including allocation-failure behavior. Noise uses
+`Noise_IK_25519_ChaChaPoly_SHA256`, with ephemeral keys generated by `getrandom`
+0.3. For a bare-metal build, select its custom backend in the firmware's
+`.cargo/config.toml`:
+
+```toml
+[target.thumbv7em-none-eabihf]
+rustflags = ['--cfg', 'getrandom_backend="custom"']
+```
+
+The final firmware must depend directly on the same `getrandom` 0.3 version
+and export exactly one unmangled Rust-ABI symbol named
+`__getrandom_v03_custom`, using `#[unsafe(no_mangle)]`:
+
+```text
+unsafe fn __getrandom_v03_custom(dest: *mut u8, len: usize) -> Result<(), getrandom::Error>
+```
+
+On success, initialize all `len` bytes at `dest` with cryptographically secure
+random data. The destination may be uninitialized and must not be read before
+writing. Report entropy-source failure as `getrandom::Error`. OpenLock maps RNG
+failures to `Error::Noise` and closes the channel on a Noise read/write failure.
+Backend selection is a firmware build setting.
+
+The authorization layer checks signatures, holder identity, lock binding,
+rights, epoch, revocation and any validity/use limits. Firmware supplies trusted
+time where required by a grant and implements `PersistentState::commit` for
+atomic durable policy/use updates. Counted grants are consumed before the
+actuator callback; ambiguous actuation must not automatically retry the same
+use number. Platform reader/card-emulation, BLE callbacks and physical I/O
+remain host responsibilities.
+
+### TOTP
+
+A TOTP-only device needs one runtime dependency:
 
 ```toml
 [dependencies]
 openlock-totp = { version = "0.3", default-features = false }
 ```
 
-For a checkout-based build, use `path = ".../crates/openlock-totp"` instead of
-a registry version. The crate is not dependent on any secure runtime crate and
-has no Noise, Ed25519, X25519, CBOR, allocator or getrandom dependency. Its
-modules are `types`, `crypto`, `core`, `protocol`, `transport::{ble,nfc}` and
-`provisioning`. See [TOTP firmware integration](architecture-totp.md).
+For a checkout-based build, use `path = ".../crates/openlock-totp"` instead of a
+registry version. Messages are fixed arrays or borrowed slices, and no Noise,
+Ed25519, X25519, CBOR, allocator or `getrandom` dependency is introduced.
 
-`openlock_totp::core::LockState` enforces the durable replay and attempt budget
-rules. TOTP primitives and wire parsers alone do not authorize opening. Keys,
-usage and policy types belong to the TOTP namespace; v2 `Grant`, `Issuer`,
-`LockState`, `CredentialId` and error types retain their original meanings.
-`openlock_issuer::totp` re-exports the TOTP local provisioning helpers for host
-applications alongside the original signing issuer.
+The lock's access path is:
+
+```text
+18-byte Unlock request
+  -> syntax and local time-window check
+  -> durable attempt reservation
+  -> local credential and policy lookup
+  -> reject consumed time step
+  -> one HMAC-SHA-256 comparison
+  -> durable consumption commit
+  -> actuator callback
+15-byte plaintext result
+```
+
+Implement `openlock_totp::core::PersistentState` with these contracts:
+
+| Method | Contract |
+| --- | --- |
+| `load_attempts` | Read the latest lock-wide attempt record; fail on corruption/read errors |
+| `commit_attempts` | Atomically and durably persist the complete reserved attempt record |
+| `load_credential` | Read the local key, policy and latest usage for a credential ID |
+| `commit_usage` | Atomically and durably persist the consumed step and use count |
+
+A credential has a 32-byte unique secret, local ID, lock binding, enabled flag,
+optional validity/use limits, and
+`UsageState { last_accepted_step: Option<u64>, uses: u32 }`. The global
+`AttemptState { last_attempt_at: Option<u64>, attempts: u8 }` survives reconnects
+and reboot. Storage capacity is chosen by firmware; the core holds one loaded
+credential at a time. Serialize fields explicitly; Rust structs and `Option`
+layouts are not persistent storage formats.
+
+One owner must serialize requests across BLE/NFC connections and local
+management. Multiple instances over one store require external serialization.
+Never reset state on reconnect, replace corrupted storage with defaults, or
+reset usage while retaining the same key. Preserve usage through disable and
+re-enable; replacement/reset requires a fresh secret. A journal, FRAM or another
+suitable durable implementation must tolerate brownouts and write wear.
+
+Pass trusted Unix seconds from the local RTC, or `None` if time is invalid.
+The core rejects rollback below its committed attempt watermark. RTC validity,
+large forward jumps, provisioning and clock repair are host responsibilities.
+A received OTP step, public NFC tag or plaintext response cannot set the clock.
+
+```rust
+use openlock_totp::core::{ActuationError, LockState, PersistentState};
+use openlock_totp::protocol::{decode_unlock, encode_response, UNLOCK_RESPONSE_SIZE};
+use openlock_totp::types::{Error, UnlockResponse};
+
+fn handle<S: PersistentState>(
+    lock: &mut LockState<S>,
+    message: &[u8],
+    trusted_unix_seconds: Option<u64>,
+    actuator: impl FnOnce() -> Result<(), ActuationError>,
+) -> Result<[u8; UNLOCK_RESPONSE_SIZE], Error> {
+    let request = decode_unlock(message)?;
+    let result = lock.unlock(&request, trusted_unix_seconds, actuator);
+    encode_response(&UnlockResponse::for_request(&request, result))
+}
+```
+
+Consumption precedes the callback. A failed callback, lost response or power
+loss after commitment cannot restore the OTP; retrying it cannot open again.
+Power loss between commit and actuation may consume a code without opening.
+The holder must use a later step. Responses are unauthenticated and cannot
+prove physical opening. Packet decoding and OTP comparison alone do not
+authorize actuation; the complete persistence and policy checks are mandatory.
+
+`openlock_totp::transport::ble::BleCodec` sends one complete message at the
+default ATT MTU. `transport::nfc::IsoDepCodec` accepts APDU data fields without
+native headers/status words. Its unsigned NDEF record is a public discovery
+hint. It cannot populate the encrypted-session trust store or change the
+configured authentication mode. See the [TOTP contract](protocol.md#totp).
 
 ## C and mobile bindings
 
-The default `openlock-ffi` exports both schemes. The original `openlock_session_*`
-and `openlock_credential_id` symbols and layouts are retained. The added
-`openlock_totp`, `openlock_make_unlock`, `openlock_encode_unlock`,
-`openlock_decode_unlock`, `openlock_encode_response` and
-`openlock_decode_response` symbols are TOTP-only helpers. Both header copies
-contain the same declarations; C ABI structs are native layouts, not packets.
+The default `openlock-ffi` exports both authentication modes:
 
-Feature selection can limit the exported implementation:
+| Mode | C entry points | Swift / Kotlin |
+| --- | --- | --- |
+| Encrypted sessions | `openlock_session_*`, `openlock_credential_id` | `OpenLockSession` |
+| TOTP | `openlock_totp`, `openlock_make_unlock`, `openlock_encode_unlock`, `openlock_decode_unlock`, `openlock_encode_response`, `openlock_decode_response` | `OpenLock` |
+
+Headers declare both sets of symbols. Their copies in `include` and the Swift
+package must match. C ABI structs are native layouts, never packet layouts.
+Build features can limit the exported implementation:
 
 ```sh
-# Combined (backward-compatible default):
+# Both modes (default):
 cargo build -p openlock-ffi
-# Secure only:
+# Encrypted sessions:
 cargo build -p openlock-ffi --no-default-features --features secure
-# TOTP only, excluding secure crypto/session dependencies:
+# TOTP:
 cargo build -p openlock-ffi --no-default-features --features totp
 ```
 
-Headers declare both schemes. Consumers of a restricted build must use only its
-selected symbols. FFI remains host-side; embedded TOTP firmware uses
-`openlock-totp` directly. FFI feature selection is a build choice, not a device
-security negotiation mechanism.
+Consumers of a restricted build must use only its selected symbols. Combined
+Swift/Kotlin wrappers link the default combined FFI library. JNI exports both
+method sets in `openlock_jni`, linked to `openlock_ffi`; both Kotlin entry points
+load the JNI shim. Build Swift with `swift build` in `bindings/swift` and see the
+[Kotlin binding guide](../bindings/kotlin/README.md) for Android packaging.
+Applications own platform I/O, key storage and explicit mode selection.
 
-Swift and Kotlin expose the original `OpenLockSession` APIs and the added
-stateless `OpenLock` TOTP helpers. The combined wrappers should link the default
-combined FFI library. JNI exports both sets of methods in `openlock_jni`, linked
-to `openlock_ffi`; both Kotlin entry points load the JNI shim. Applications own
-platform I/O, key storage and explicit scheme selection.
+For encrypted sessions, the client creates `OpenLockSession` with its private
+key, the trusted lock public key and capabilities, then exchanges handshake and
+request/response packets according to the session state machine.
 
-## Compatibility with the TOTP proposal
+For TOTP, Rust clients use `openlock_totp::crypto::unlock_request` and
+`openlock_totp::protocol::encode_unlock`. C and mobile clients generate a complete
+packet directly. Swift:
 
-The former replacement-only proposal's Rust implementation moved as follows:
+```swift
+let packet = try OpenLock.makeUnlock(secret: provisionedSecret,
+                                    credentialID: 7, unixSeconds: trustedNow)
+let result = try OpenLock.decodeResponse(receivedBytes)
+```
 
-| Proposal crate | Final optional scheme module |
-| --- | --- |
-| `openlock-types` | `openlock_totp::types` |
-| `openlock-crypto` | `openlock_totp::crypto` |
-| `openlock-core` | `openlock_totp::core` |
-| `openlock-protocol` | `openlock_totp::protocol` |
-| `openlock-transport` | `openlock_totp::transport` |
-| `openlock-transport-ble` / `openlock-transport-nfc` | `openlock_totp::transport::ble` / `openlock_totp::transport::nfc` |
-| local TOTP issuer | `openlock_totp::provisioning` or `openlock_issuer::totp` |
+Kotlin:
 
-Its TOTP wire bytes and C/mobile entry points remain available. The original
-crate names again denote the fully supported secure v2 scheme. New projects
-should use these explicit namespaces and avoid mixing the schemes' credentials,
-clocks, counters or transport codecs.
+```kotlin
+val packet = OpenLock.makeUnlock(provisionedSecret, credentialId = 7L, unixSeconds = trustedNow)
+val result = OpenLock.decodeResponse(receivedBytes)
+```
+
+The platform transports these bytes and correlates the response ID/step with its
+request. Neither a match nor `Replayed` proves a new opening. Do not automatically
+issue another actuation after an ambiguous result. Kotlin requires nonnegative
+signed `Long` timestamps/steps and IDs in `1..0xffffffff`; larger response steps
+are rejected. Rust TOTP secret wrappers redact Debug and erase their own key
+bytes on drop. Applications own all platform copies and secret lifetimes.
 
 ## Verification
 
-`cargo test --workspace` covers the retained secure suite and the TOTP suite,
-including secure fixed wire bytes, Noise sessions, signed grants/policies,
-trust/rotation, transport framing, RFC TOTP vectors, one-time use across reboot
-and BLE/NFC, persistent throttling, clock rollback and ambiguous commit/actuator
-failures. A combined-ABI test exercises both paths and rejects a TOTP packet in
-a secure session. Build checks cover each restricted FFI feature set.
+`cargo test --workspace` covers both authentication modes: fixed wire bytes,
+Noise sessions, signed grants/policies, trust/rotation, transport framing, RFC
+TOTP vectors, one-time use across reboot and BLE/NFC, persistent throttling,
+clock rollback and ambiguous commit/actuator failures. A combined-ABI test
+exercises both modes and rejects a TOTP packet in an encrypted session. Build
+checks also cover each restricted FFI feature set.
 
 `devenv shell -- no-std-check` runs runtime tests without default features,
-checks secure libraries for `thumbv7em-none-eabihf` using the existing custom RNG
-setting, and checks `openlock-totp` separately without that setting. These checks
-do not link firmware or measure physical brownout recovery, RAM/flash or power.
+checks session libraries for `thumbv7em-none-eabihf` using the custom RNG setting,
+and checks `openlock-totp` independently without that setting. These are library
+compile checks: they provide neither an allocator nor the custom RNG symbol,
+and do not link firmware or verify physical brownout recovery, memory use or
+power consumption.

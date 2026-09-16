@@ -1,6 +1,6 @@
-//! Optional plaintext TOTP scheme in OpenLock v3. The secure v2 scheme remains
-//! available in the original OpenLock crates. Selection is explicit; there is
-//! no automatic fallback between schemes.
+//! Plaintext TOTP authentication for OpenLock. Firmware selects its mode
+//! through trusted configuration; there is no automatic fallback between
+//! encrypted sessions and TOTP.
 //!
 //! This crate is independent of the secure crates and needs no heap, public-key
 //! cryptography, or runtime RNG. Firmware supplies trusted time and durable

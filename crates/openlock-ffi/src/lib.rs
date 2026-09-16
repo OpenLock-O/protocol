@@ -1,4 +1,4 @@
-//! OpenLock v3 C ABI: secure v2 sessions and optional plaintext TOTP helpers.
+//! OpenLock C ABI for encrypted sessions and plaintext TOTP authentication.
 //! Both schemes are enabled by default; choose features explicitly for a smaller
 //! library. Enabling TOTP does not alter or downgrade secure-session behavior.
 

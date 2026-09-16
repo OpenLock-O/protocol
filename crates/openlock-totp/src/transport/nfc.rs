@@ -1,4 +1,4 @@
-//! Public NFC discovery and one v3 message per ISO-DEP/APDU data field.
+//! Public NFC discovery and one TOTP message per ISO-DEP/APDU data field.
 
 use crate::transport::{validate_message, FrameCodec, TransportError};
 use crate::types::{Error, LockId, PROFILE, PROTOCOL_VERSION};

@@ -1,4 +1,4 @@
-//! v2 authorization domain. Transport and cryptographic primitives live in
+//! Signed-grant authorization. Transport and cryptographic primitives live in
 //! `openlock-protocol`, `openlock-transport-*`, and `openlock-crypto`.
 #![cfg_attr(not(feature = "std"), no_std)]
 

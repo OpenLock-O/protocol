@@ -10,7 +10,7 @@ public struct OpenLockResponse {
     public let errorCode: UInt32
 }
 
-/// Optional TOTP client in v3. BLE/NFC I/O and key storage are host-owned.
+/// OpenLock TOTP client. BLE/NFC I/O and key storage are host-owned.
 public enum OpenLock {
     public static func makeUnlock(secret: Data, credentialID: UInt32, unixSeconds: UInt64) throws -> Data {
         guard secret.count == 32, credentialID != 0 else { throw OpenLockError.code(3) }

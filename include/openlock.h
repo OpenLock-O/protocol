@@ -8,12 +8,13 @@
 extern "C" {
 #endif
 
-/* v3 release contains both wire protocols. The generic macro is the TOTP
- * proposal alias; secure sessions retain wire version 2. */
+/* Encoding identifiers for the authentication modes.
+ * OPENLOCK_PROTOCOL_VERSION aliases the TOTP identifier; use the mode-specific
+ * constant when selecting an encoder. */
 #define OPENLOCK_SECURE_PROTOCOL_VERSION 2
 #define OPENLOCK_TOTP_PROTOCOL_VERSION 3
 #define OPENLOCK_PROTOCOL_VERSION OPENLOCK_TOTP_PROTOCOL_VERSION
-/* Secure v2 API: available with the secure Cargo feature (default). */
+/* Encrypted-session API: available with the secure Cargo feature (default). */
 typedef struct {
     uint8_t bytes[16];
 } openlock_credential_id_t;
@@ -76,7 +77,7 @@ typedef struct {
 } openlock_response_t;
 
 /* Return: 0 success, -1 invalid pointer, -2 output capacity too small,
- * positive protocol error (see docs/protocol-totp.md).
+ * positive protocol error (see docs/protocol.md#stable-errors).
  * Every secret pointer refers to exactly 32 readable bytes.
  * out_len must be writable and not overlap out. Pass NULL/0 for out/capacity
  * to query required length (-2); small buffers remain untouched.

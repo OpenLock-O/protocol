@@ -4,7 +4,7 @@ package org.openlock
 /** Plaintext, unauthenticated result; it is not proof of physical opening. */
 data class OpenLockResponse(val credentialId: Long, val timeStep: Long, val errorCode: Int)
 
-/** Optional TOTP client in v3. Applications own BLE/NFC I/O and key storage. */
+/** OpenLock TOTP client. Applications own BLE/NFC I/O and key storage. */
 object OpenLock {
     init { System.loadLibrary("openlock_jni") }
 

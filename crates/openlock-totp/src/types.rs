@@ -1,4 +1,4 @@
-//! Fixed-size values for the OpenLock v3 plaintext TOTP profile.
+//! Fixed-size values for OpenLock plaintext TOTP authentication.
 
 use thiserror::Error;
 
@@ -103,7 +103,7 @@ pub enum Error {
     UnknownCredential,
 }
 impl Error {
-    /// Shared v2 meanings keep their numbers; codes outside TOTP are reserved.
+    /// Stable, positive TOTP wire/FFI error codes; unassigned codes are reserved.
     pub const fn code(self) -> u32 {
         match self {
             Self::ObjectTooLarge => 1,

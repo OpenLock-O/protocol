@@ -1,4 +1,4 @@
-//! Stateless, fixed-size OpenLock v3 plaintext messages. No handshake or heap.
+//! Stateless, fixed-size TOTP messages for OpenLock. No handshake or heap.
 
 use crate::types::{CredentialId, Error, UnlockRequest, UnlockResponse, PROTOCOL_VERSION};
 

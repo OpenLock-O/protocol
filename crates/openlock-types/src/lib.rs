@@ -174,7 +174,7 @@ pub enum Error {
     InvalidNfc,
 }
 impl Error {
-    /// Stable, positive v2 wire/FFI error codes.
+    /// Stable, positive encrypted-session wire/FFI error codes.
     pub fn code(&self) -> u32 {
         match self {
             Self::ObjectTooLarge => 1,

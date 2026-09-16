@@ -1,4 +1,4 @@
-//! Transport-neutral OpenLock v2 message envelope and session state machine.
+//! Transport-neutral encrypted-session envelope and state machine for OpenLock.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
