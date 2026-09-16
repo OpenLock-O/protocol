@@ -1,79 +1,83 @@
-//! Offline administrator-side credential issuing helpers.
+//! Host-side preparation of credentials for a trusted LOCAL provisioning path.
+//! This crate does not send secrets or management commands over BLE/NFC.
 
-use ed25519_dalek::SigningKey;
-use openlock_core::{
-    sign_grant, sign_policy, CredentialId, Grant, LockId, PolicyUpdate, SubjectKey,
-};
-use openlock_crypto::{sign_device_key, sign_key_update};
-use openlock_types::{DeviceKey, DeviceKeyRecord, KeyUpdate};
-use std::collections::BTreeSet;
-
-pub struct Issuer {
-    key: SigningKey,
-}
+use openlock_core::{Credential, UsageState};
+use openlock_crypto::TotpSecret;
+use openlock_types::{CredentialId, Error, LockId, Validity};
 
 pub struct IssueRequest {
     pub credential_id: CredentialId,
-    pub lock_id: LockId,
-    pub subject_key: SubjectKey,
-    pub rights: u32,
-    pub epoch: u64,
-    pub validity: Option<(u64, u64)>,
+    /// Fresh 32-byte CSPRNG output, unique per lock and credential. Callers own
+    /// key generation and secure delivery to the lock and authorized client.
+    pub secret: TotpSecret,
+    pub validity: Option<Validity>,
     pub max_uses: Option<u32>,
 }
 
+pub struct Issuer {
+    lock_id: LockId,
+}
 impl Issuer {
-    pub fn from_signing_key(key: SigningKey) -> Self {
-        Self { key }
+    pub fn new(lock_id: LockId) -> Self {
+        Self { lock_id }
     }
-
-    pub fn verifying_key(&self) -> [u8; 32] {
-        self.key.verifying_key().to_bytes()
-    }
-
-    pub fn issue(&self, request: &IssueRequest) -> Result<(Grant, Vec<u8>), openlock_core::Error> {
-        let grant = Grant {
-            credential_id: request.credential_id,
-            lock_id: request.lock_id,
-            subject_key: request.subject_key,
-            rights: request.rights,
-            epoch: request.epoch,
-            validity: request
-                .validity
-                .map(|(not_before, not_after)| openlock_core::Validity {
-                    not_before,
-                    not_after,
-                }),
+    /// Only install as a new credential. Replacing an existing key with the
+    /// same secret and default usage would re-enable already consumed OTPs.
+    pub fn issue(&self, request: IssueRequest) -> Result<Credential, Error> {
+        let credential = Credential {
+            lock_id: self.lock_id,
+            id: request.credential_id,
+            secret: request.secret,
+            enabled: true,
+            validity: request.validity,
             max_uses: request.max_uses,
+            usage: UsageState::default(),
         };
-        Ok((grant.clone(), sign_grant(&self.key, &grant)?))
+        credential.validate()?;
+        Ok(credential)
     }
+}
 
-    pub fn revoke(
-        &self,
-        lock_id: LockId,
-        epoch: u64,
-        version: u64,
-        revoked: BTreeSet<CredentialId>,
-    ) -> Result<(PolicyUpdate, Vec<u8>), openlock_core::Error> {
-        let update = PolicyUpdate {
-            lock_id,
-            epoch,
-            version,
-            revoked,
-        };
-        Ok((update.clone(), sign_policy(&self.key, &update)?))
-    }
-
-    pub fn issue_device_key(
-        &self,
-        key: DeviceKey,
-        issuer_key_id: u32,
-    ) -> Result<DeviceKeyRecord, openlock_core::Error> {
-        sign_device_key(&self.key, &key, issuer_key_id)
-    }
-
-    pub fn rotate_device_key(&self, update: KeyUpdate) -> Result<KeyUpdate, openlock_core::Error> {
-        sign_key_update(&self.key, update)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn provisioning_rejects_invalid_constraints() {
+        let issuer = Issuer::new(LockId([1; 16]));
+        for (id, max, validity, valid) in [
+            (1, None, None, true),
+            (0, None, None, false),
+            (1, Some(0), None, false),
+            (
+                1,
+                Some(2),
+                Some(Validity {
+                    not_before: 10,
+                    not_after: 10,
+                }),
+                false,
+            ),
+            (
+                1,
+                Some(2),
+                Some(Validity {
+                    not_before: 10,
+                    not_after: 20,
+                }),
+                true,
+            ),
+        ] {
+            assert_eq!(
+                issuer
+                    .issue(IssueRequest {
+                        credential_id: CredentialId(id),
+                        secret: TotpSecret::new([1; 32]),
+                        validity,
+                        max_uses: max,
+                    })
+                    .is_ok(),
+                valid
+            );
+        }
     }
 }

@@ -9,4 +9,3 @@ rust-version.workspace = true
 openlock-core = { path = "../openlock-core", features = ["std"] }
 openlock-crypto = { workspace = true, features = ["std"] }
 openlock-types = { workspace = true, features = ["std"] }
-ed25519-dalek.workspace = true

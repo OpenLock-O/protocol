@@ -55,7 +55,7 @@
     cargo test --locked --workspace --no-default-features \
       --exclude openlock-issuer \
       --exclude openlock-ffi
-    RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --locked --lib \
+    cargo check --locked --lib \
       -p openlock-types \
       -p openlock-crypto \
       -p openlock-protocol \

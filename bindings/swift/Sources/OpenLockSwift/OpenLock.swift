@@ -2,45 +2,46 @@ import Foundation
 import OpenLockFFI
 
 public enum OpenLockError: Error { case code(Int32) }
-public final class OpenLockSession {
-    private var handle: OpaquePointer?
-    public init(initiatorPrivateKey: Data, lockPublicKey: Data, capabilities: UInt64) throws {
-        guard initiatorPrivateKey.count == 32, lockPublicKey.count == 32 else { throw OpenLockError.code(-1) }
-        var created: OpaquePointer?
-        let code = initiatorPrivateKey.withUnsafeBytes { p in lockPublicKey.withUnsafeBytes { q in openlock_session_initiator(p.bindMemory(to: UInt8.self).baseAddress, q.bindMemory(to: UInt8.self).baseAddress, capabilities, &created) } }
-        guard code == 0, let created else { throw OpenLockError.code(code) }; handle = created
-    }
-    deinit { if let handle { openlock_session_free(handle) } }
-    public func start() throws -> Data {
-        guard let handle else { throw OpenLockError.code(17) }; var buffer = [UInt8](repeating: 0, count: 4096); var length = 0
-        let code = openlock_session_start(handle, &buffer, buffer.count, &length); guard code == 0 else { throw OpenLockError.code(code) }; return Data(buffer[..<length])
-    }
-    public func receive(_ input: Data) throws -> (event: UInt32, reply: Data) {
-        guard let handle else { throw OpenLockError.code(17) }
-        var buffer = [UInt8](repeating: 0, count: 4096); var length = 0; var event: UInt32 = 0
-        let code = input.withUnsafeBytes { p in
-            openlock_session_receive(handle, p.bindMemory(to: UInt8.self).baseAddress, input.count,
-                                     &buffer, buffer.count, &length, &event)
+
+/// Plaintext, unauthenticated result. Matching credentialID/timeStep only
+/// correlates the response; it does not prove lock identity or physical opening.
+public struct OpenLockResponse {
+    public let credentialID: UInt32
+    public let timeStep: UInt64
+    public let errorCode: UInt32
+}
+
+/// Stateless v3 client. BLE/NFC I/O and secure secret storage are host-owned.
+public enum OpenLock {
+    public static func makeUnlock(secret: Data, credentialID: UInt32, unixSeconds: UInt64) throws -> Data {
+        guard secret.count == 32, credentialID != 0 else { throw OpenLockError.code(3) }
+        var buffer = [UInt8](repeating: 0, count: Int(OPENLOCK_REQUEST_SIZE))
+        var length = 0
+        let code = secret.withUnsafeBytes { key in
+            openlock_make_unlock(key.bindMemory(to: UInt8.self).baseAddress, credentialID,
+                                 unixSeconds, &buffer, buffer.count, &length)
         }
         guard code == 0 else { throw OpenLockError.code(code) }
-        return (event, Data(buffer[..<length]))
+        return Data(buffer[..<length])
     }
-    public func sendStatus(credential: Data, requestedUse: Int64 = -1) throws -> (UInt32, Data) {
-        guard let handle else { throw OpenLockError.code(17) }
-        var buffer = [UInt8](repeating: 0, count: 4096); var length = 0; var requestID: UInt32 = 0
-        let code = credential.withUnsafeBytes { p in
-            openlock_session_send_status(handle, p.bindMemory(to: UInt8.self).baseAddress, credential.count, requestedUse, &requestID, &buffer, buffer.count, &length)
+
+    /// Encode a code received through an authorized out-of-band path.
+    public static func encodeUnlock(credentialID: UInt32, timeStep: UInt64, code: UInt32) throws -> Data {
+        var buffer = [UInt8](repeating: 0, count: Int(OPENLOCK_REQUEST_SIZE))
+        var length = 0
+        let result = openlock_encode_unlock(credentialID, timeStep, code, &buffer, buffer.count, &length)
+        guard result == 0 else { throw OpenLockError.code(result) }
+        return Data(buffer[..<length])
+    }
+
+    public static func decodeResponse(_ input: Data) throws -> OpenLockResponse {
+        guard input.count == Int(OPENLOCK_RESPONSE_SIZE) else { throw OpenLockError.code(3) }
+        var response = openlock_response_t()
+        let code = input.withUnsafeBytes { bytes in
+            openlock_decode_response(bytes.bindMemory(to: UInt8.self).baseAddress, input.count, &response)
         }
         guard code == 0 else { throw OpenLockError.code(code) }
-        return (requestID, Data(buffer[..<length]))
-    }
-    public func sendPolicy(policy: Data) throws -> (UInt32, Data) {
-        guard let handle else { throw OpenLockError.code(17) }
-        var buffer = [UInt8](repeating: 0, count: 4096); var length = 0; var requestID: UInt32 = 0
-        let code = policy.withUnsafeBytes { p in
-            openlock_session_send_policy(handle, p.bindMemory(to: UInt8.self).baseAddress, policy.count, &requestID, &buffer, buffer.count, &length)
-        }
-        guard code == 0 else { throw OpenLockError.code(code) }
-        return (requestID, Data(buffer[..<length]))
+        return OpenLockResponse(credentialID: response.credential_id,
+                                timeStep: response.time_step, errorCode: response.error_code)
     }
 }

@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "LGPL-3.0-or-later"
 rust-version = "1.81"
@@ -26,16 +26,9 @@ openlock-protocol = { path = "crates/openlock-protocol", default-features = fals
 openlock-transport = { path = "crates/openlock-transport", default-features = false }
 openlock-transport-ble = { path = "crates/openlock-transport-ble", default-features = false }
 openlock-transport-nfc = { path = "crates/openlock-transport-nfc", default-features = false }
-ed25519-dalek = { version = "2.1", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
 sha2 = { version = "0.10", default-features = false }
-ciborium = { version = "0.2", default-features = false }
-snow = { version = "0.10", default-features = false, features = [
-  "default-resolver",
-  "use-curve25519",
-  "use-chacha20poly1305",
-  "use-sha2",
-  "use-getrandom",
-] }
-x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
+hmac = { version = "0.12", default-features = false }
+subtle = { version = "2.6", default-features = false }
+# 1.9 raises the MSRV above the workspace's Rust 1.81 baseline.
+zeroize = { version = "~1.8.2", default-features = false }
 thiserror = { version = "2.0.20", default-features = false }
-rand_core = { version = "0.6", default-features = false }

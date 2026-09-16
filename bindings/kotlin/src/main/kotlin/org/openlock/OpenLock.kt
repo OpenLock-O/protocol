@@ -1,16 +1,31 @@
 package org.openlock
 
 class OpenLockException(val code: Int) : RuntimeException("OpenLock error $code")
-/** Thin byte-oriented wrapper; Android NFC/BLE callbacks remain platform code. */
-class OpenLockSession private constructor(private var handle: Long) : AutoCloseable {
-    companion object {
-        init { System.loadLibrary("openlock_ffi") }
-        @JvmStatic private external fun newInitiator(privateKey: ByteArray, lockPublic: ByteArray, capabilities: Long): Long
-        @JvmStatic private external fun free(handle: Long)
-        fun initiator(privateKey: ByteArray, lockPublic: ByteArray, capabilities: Long): OpenLockSession {
-            require(privateKey.size == 32 && lockPublic.size == 32)
-            val pointer = newInitiator(privateKey, lockPublic, capabilities); if (pointer == 0L) throw OpenLockException(-1); return OpenLockSession(pointer)
-        }
+
+/** Plaintext, unauthenticated result; it is not proof of physical opening. */
+data class OpenLockResponse(val credentialId: Long, val timeStep: Long, val errorCode: Int)
+
+/** Stateless v3 client. Applications own BLE/NFC I/O and secure secret storage. */
+object OpenLock {
+    init { System.loadLibrary("openlock_jni") }
+
+    @JvmStatic private external fun makeUnlockNative(secret: ByteArray, credentialId: Long, unixSeconds: Long): ByteArray
+    @JvmStatic private external fun encodeUnlockNative(credentialId: Long, timeStep: Long, code: Int): ByteArray
+    @JvmStatic private external fun decodeResponseNative(input: ByteArray): LongArray
+
+    fun makeUnlock(secret: ByteArray, credentialId: Long, unixSeconds: Long): ByteArray {
+        require(secret.size == 32 && credentialId in 1..0xffff_ffffL && unixSeconds >= 0)
+        return makeUnlockNative(secret, credentialId, unixSeconds)
     }
-    override fun close() { if (handle != 0L) { free(handle); handle = 0L } }
+
+    fun encodeUnlock(credentialId: Long, timeStep: Long, code: Int): ByteArray {
+        require(credentialId in 1..0xffff_ffffL && timeStep >= 0 && code in 0..99_999_999)
+        return encodeUnlockNative(credentialId, timeStep, code)
+    }
+
+    fun decodeResponse(input: ByteArray): OpenLockResponse {
+        require(input.size == 15)
+        val fields = decodeResponseNative(input)
+        return OpenLockResponse(fields[0], fields[1], fields[2].toInt())
+    }
 }

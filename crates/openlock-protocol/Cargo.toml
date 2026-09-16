@@ -7,8 +7,14 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["openlock-types/std", "openlock-crypto/std"]
+std = ["openlock-types/std"]
 
 [dependencies]
 openlock-types = { workspace = true, default-features = false }
-openlock-crypto = { workspace = true, default-features = false }
+
+[dev-dependencies]
+openlock-core.workspace = true
+openlock-crypto.workspace = true
+openlock-transport.workspace = true
+openlock-transport-ble.workspace = true
+openlock-transport-nfc.workspace = true

@@ -1,34 +1,31 @@
-//! Byte-oriented transport extension point. Platform I/O stays outside this crate.
+//! Borrowed, complete-message transports. No fragmentation, buffering or heap.
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
-use alloc::vec::Vec;
 use thiserror::Error;
 
-#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub const MAX_FRAME_MESSAGE: usize = 20;
+
+#[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum TransportError {
-    #[error("fragment is too short")]
-    TooShort,
-    #[error("fragment has invalid length")]
+    #[error("empty message or invalid transport length")]
     InvalidLength,
-    #[error("message exceeds configured limit")]
+    #[error("message exceeds the v3 transport limit")]
     TooLarge,
-    #[error("fragment is outside message")]
-    OutOfBounds,
-    #[error("fragment conflicts with an existing fragment")]
-    Conflict,
-    #[error("another message is being reassembled")]
-    Busy,
-    #[error("message is incomplete")]
-    Incomplete,
-    #[error("invalid NFC record or APDU")]
-    InvalidNfc,
 }
 
+pub fn validate_message(message: &[u8]) -> Result<&[u8], TransportError> {
+    if message.is_empty() {
+        Err(TransportError::InvalidLength)
+    } else if message.len() > MAX_FRAME_MESSAGE {
+        Err(TransportError::TooLarge)
+    } else {
+        Ok(message)
+    }
+}
+
+/// The host delivers one complete message per GATT write/notification or APDU
+/// data field. Native platform framing/status words stay outside this API.
 pub trait FrameCodec {
-    type Error;
-    fn encode(&mut self, message: &[u8]) -> Result<Vec<Vec<u8>>, Self::Error>;
-    fn push(&mut self, fragment: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
-    fn reset(&mut self);
+    fn encode<'a>(&self, message: &'a [u8]) -> Result<&'a [u8], TransportError>;
+    fn decode<'a>(&self, frame: &'a [u8]) -> Result<&'a [u8], TransportError>;
 }

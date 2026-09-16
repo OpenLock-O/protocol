@@ -11,8 +11,7 @@ std = ["openlock-types/std"]
 
 [dependencies]
 openlock-types = { workspace = true, default-features = false }
-ed25519-dalek.workspace = true
 sha2.workspace = true
-ciborium = { workspace = true, default-features = false }
-snow = { workspace = true, default-features = false }
-x25519-dalek.workspace = true
+hmac.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
