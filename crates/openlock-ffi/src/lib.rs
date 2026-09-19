@@ -61,12 +61,10 @@ fn event_bytes(event: &SessionEvent) -> Result<Vec<u8>, Error> {
             response,
         } => (3, *request_id, Value::Null, response.value()),
     };
-    cbor::encode(&cbor::array(vec![
-        cbor::uint(tag),
-        cbor::uint(id as u64),
-        peer,
-        body,
-    ]))
+    cbor::encode_limit(
+        &cbor::array(vec![cbor::uint(tag), cbor::uint(id as u64), peer, body]),
+        MAX_EVENT_SIZE,
+    )
 }
 #[no_mangle]
 pub unsafe extern "C" fn openlock_session_initiator(
@@ -378,6 +376,118 @@ mod tests {
         let mut data = vec![0; n];
         assert_eq!(call(s, data.as_mut_ptr(), n, &mut n), 0);
         data
+    }
+    #[test]
+    fn near_limit_wire_request_preserves_a_larger_authenticated_event() {
+        use openlock_protocol::{decode_packet, encode_packet, Packet};
+        let issuer = SigningKey::from_bytes(&[9; 32]);
+        let peer = openlock_crypto::static_public(&[3; 32]);
+        let credential = openlock_crypto::sign_grant(
+            &issuer,
+            &Grant {
+                credential_id: CredentialId([2; 16]),
+                lock_id: LockId([1; 16]),
+                subject_key: SubjectKey(peer),
+                rights: RIGHTS_CREDENTIALS,
+                epoch: 0,
+                validity: None,
+                max_uses: None,
+            },
+        )
+        .unwrap();
+        let policy = PolicyUpdate {
+            lock_id: LockId([1; 16]),
+            epoch: 0,
+            version: 1,
+            revoked: (0..223u16)
+                .map(|n| {
+                    let mut id = [0; 16];
+                    id[..2].copy_from_slice(&n.to_le_bytes());
+                    CredentialId(id)
+                })
+                .collect(),
+        };
+        let command = Command {
+            credential,
+            sequence: Some(1),
+            action: Action::ApplyPolicy(openlock_crypto::sign_policy(&issuer, &policy).unwrap()),
+        };
+        let clear = cbor::encode(&cbor::array(vec![
+            cbor::uint(1),
+            cbor::uint(1),
+            cbor::uint(4),
+            command.value(),
+        ]))
+        .unwrap();
+        let public = openlock_crypto::static_public(&[4; 32]);
+        // An interoperating peer may use the full wire limit, unlike the Rust
+        // sender's conservative sizing budget. Exercise an actual Noise packet.
+        let mut noise = snow::Builder::new("Noise_IK_25519_ChaChaPoly_SHA256".parse().unwrap())
+            .prologue(b"OpenLock/v4/profile1")
+            .unwrap()
+            .local_private_key(&[3; 32])
+            .unwrap()
+            .remote_public_key(&public)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+        let mut encrypted = [0; MAX_MESSAGE_SIZE];
+        let size = noise.write_message(&[], &mut encrypted).unwrap();
+        let first = encode_packet(&Packet {
+            kind: 0,
+            request_id: 0,
+            capabilities: 0,
+            payload: encrypted[..size].to_vec(),
+        })
+        .unwrap();
+        unsafe {
+            let mut native = ptr::null_mut();
+            assert_eq!(
+                openlock_session_responder([4; 32].as_ptr(), 4, &mut native),
+                0
+            );
+            assert_eq!(
+                openlock_session_receive(native, first.as_ptr(), first.len()),
+                0
+            );
+            drain(native, true);
+            let reply = drain(native, false);
+            noise
+                .read_message(&decode_packet(&reply).unwrap().payload, &mut encrypted)
+                .unwrap();
+            let mut transport = noise.into_transport_mode().unwrap();
+            let size = transport.write_message(&clear, &mut encrypted).unwrap();
+            let packet = encode_packet(&Packet {
+                kind: 1,
+                request_id: 1,
+                capabilities: 4,
+                payload: encrypted[..size].to_vec(),
+            })
+            .unwrap();
+            assert!(packet.len() <= MAX_MESSAGE_SIZE);
+            assert_eq!(
+                openlock_session_receive(native, packet.as_ptr(), packet.len()),
+                0
+            );
+            let mut small = [0xcc; MAX_MESSAGE_SIZE];
+            let mut required = 0;
+            assert_eq!(
+                openlock_session_take_event(native, small.as_mut_ptr(), small.len(), &mut required),
+                -2
+            );
+            assert!(required > MAX_MESSAGE_SIZE && required <= MAX_EVENT_SIZE);
+            assert!(small.iter().all(|byte| *byte == 0xcc));
+            let event = drain(native, true);
+            assert_eq!(event.len(), required);
+            let value = cbor::decode_limit(&event, MAX_EVENT_SIZE).unwrap();
+            let fields = cbor::fields(&value, 4).unwrap();
+            assert_eq!(cbor::number(&fields[0]).unwrap(), 2);
+            assert_eq!(cbor::number(&fields[1]).unwrap(), 1);
+            assert_eq!(cbor::fixed::<32>(&fields[2]).unwrap(), peer);
+            assert_eq!(Command::parse(&fields[3]).unwrap(), command);
+            assert!(drain(native, true).is_empty());
+            openlock_session_free(native);
+        }
     }
     #[test]
     fn capacity_queries_preserve_noise_and_complete_events() {

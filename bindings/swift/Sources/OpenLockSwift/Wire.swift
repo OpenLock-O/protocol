@@ -19,7 +19,7 @@ indirect enum Wire: Equatable {
         case .null: return Data([0xf6])
         }
     }
-    static func decode(_ data: Data) throws -> Wire {
+    static func decode(_ data: Data, limit: Int = 4096) throws -> Wire {
         let bytes = Array(data); var i = 0
         func byte() throws -> UInt8 { guard i < bytes.count else { throw OpenLockError.malformed }; defer { i += 1 }; return bytes[i] }
         func parse(_ depth: Int) throws -> Wire {
@@ -43,7 +43,7 @@ indirect enum Wire: Equatable {
             default: throw OpenLockError.malformed
             }
         }
-        guard data.count <= 4096 else { throw OpenLockError.malformed }
+        guard data.count <= limit else { throw OpenLockError.malformed }
         let value = try parse(0); guard i == bytes.count && value.encoded == data else { throw OpenLockError.malformed }; return value
     }
     func fields(_ count: Int) throws -> [Wire] { guard case .array(let a) = self, a.count == count else { throw OpenLockError.malformed }; return a }

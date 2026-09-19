@@ -121,3 +121,19 @@ fn wrong_qr_public_key_cannot_complete_the_handshake() {
         Err(Error::Noise)
     );
 }
+
+#[test]
+fn unauthenticated_nested_cbor_is_rejected_on_a_small_stack() {
+    std::thread::Builder::new()
+        .stack_size(64 * 1024)
+        .spawn(|| {
+            for head in [0x81, 0xa1, 0xc0] {
+                let mut packet = vec![head; 200];
+                packet.push(0);
+                assert!(decode_packet(&packet).is_err());
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

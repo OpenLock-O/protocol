@@ -1,7 +1,7 @@
 //! The v2 profile permits only definite, minimally encoded arrays, bytes and integers.
 use alloc::vec::Vec;
 pub use ciborium::value::Value;
-use ciborium::{de::from_reader, ser::into_writer};
+use ciborium::{de::from_reader_with_recursion_limit, ser::into_writer};
 use openlock_types::{Error, MAX_OBJECT_SIZE};
 
 pub fn uint(n: u64) -> Value {
@@ -63,7 +63,10 @@ pub fn decode_limit(bytes: &[u8], limit: usize) -> Result<Value, Error> {
         return Err(Error::ObjectTooLarge);
     }
     let mut input = bytes;
-    let value: Value = from_reader(&mut input).map_err(|_| Error::InvalidPayload)?;
+    // Protocol records need fewer than 16 nested containers. Bound recursion
+    // before allocating a Value tree or recursively re-encoding it.
+    let value: Value =
+        from_reader_with_recursion_limit(&mut input, 16).map_err(|_| Error::InvalidPayload)?;
     if !input.is_empty() || encode_limit(&value, limit)? != bytes {
         return Err(Error::InvalidPayload);
     }

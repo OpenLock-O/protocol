@@ -34,7 +34,12 @@ devenv shell -- scripts/check-bindings.sh
 This builds and runs desktop JNI integration against the Rust device simulator.
 For Android, compile `openlock-ffi` for each Android ABI and pass the directory
 containing that library to CMake as `OPENLOCK_LIBRARY_DIR`. Package both
-`libopenlock_jni.so` and `libopenlock_ffi.so`. Desktop CMake locates JNI headers
+`libopenlock_jni.so` and `libopenlock_ffi.so`. The JAR includes consumer rules in `META-INF/proguard/openlock.pro` to retain
+JNI entry points and the native exception constructor in R8/ProGuard release
+builds. Keep these rules when repackaging the library; manually configured
+shrinker pipelines must include them.
+
+Desktop CMake locates JNI headers
 with `find_package(JNI)`; Android uses NDK headers.
 
 See [protocol](../../docs/protocol.md) and [integration](../../docs/architecture.md)

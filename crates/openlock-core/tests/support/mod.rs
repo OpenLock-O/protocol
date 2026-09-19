@@ -4,20 +4,30 @@ use openlock_crypto::{sha256, sign_grant, static_public, SigningKey};
 use openlock_types::*;
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     rc::Rc,
 };
 #[derive(Clone, Default)]
 pub struct MemoryStore {
+    pub trace: Rc<RefCell<Vec<&'static str>>>,
     pub state: Rc<RefCell<Option<DeviceSnapshot>>>,
     pub commits: Rc<Cell<usize>>,
     pub fail_at: Rc<Cell<Option<usize>>>,
     pub after_write: Rc<Cell<bool>>,
+    pub fail_load: Rc<Cell<bool>>,
+    pub commit_hook: Rc<RefCell<Option<CommitHook>>>,
 }
+pub type CommitHook = Box<dyn FnOnce()>;
 impl DeviceStorage for MemoryStore {
     fn load(&self) -> Result<Option<DeviceSnapshot>, Error> {
+        self.trace.borrow_mut().push("load");
+        if self.fail_load.get() {
+            return Err(Error::StorageUnavailable);
+        }
         Ok(self.state.borrow().clone())
     }
     fn commit(&mut self, s: &DeviceSnapshot) -> Result<(), Error> {
+        self.trace.borrow_mut().push("commit");
         let count = self.commits.get() + 1;
         self.commits.set(count);
         if self.fail_at.get() == Some(count) {
@@ -27,20 +37,33 @@ impl DeviceStorage for MemoryStore {
             return Err(Error::StorageUnavailable);
         }
         *self.state.borrow_mut() = Some(s.clone());
+        if let Some(hook) = self.commit_hook.borrow_mut().take() {
+            hook();
+        }
         Ok(())
     }
 }
 #[derive(Clone)]
 pub struct Hardware {
+    pub trace: Rc<RefCell<Vec<&'static str>>>,
     pub ms: u64,
     pub unix: Option<u64>,
     pub sample: HardwareSample,
+    pub sample_override: Rc<Cell<Option<HardwareSample>>>,
+    pub monotonic_override: Rc<Cell<Option<u64>>>,
+    pub wall_override: Rc<Cell<Option<u64>>>,
+    pub wall_reads: Cell<usize>,
+    pub wall_tick_on_read: Cell<Option<(usize, u64)>>,
+    pub wall_samples: RefCell<VecDeque<Option<ClockSample>>>,
     pub actions: Vec<ActionTarget>,
+    pub action_id: Option<ActuationId>,
     pub fail_start: bool,
+    pub fail_stop: bool,
     pub stop_count: usize,
     pub reboot: bool,
     pub image: Vec<u8>,
     pub boot: BootOutcome,
+    pub boot_candidate: Option<FirmwareManifest>,
     pub activation_count: usize,
     pub fail_write: bool,
     pub power_ok: bool,
@@ -48,6 +71,7 @@ pub struct Hardware {
 impl Default for Hardware {
     fn default() -> Self {
         Self {
+            trace: Default::default(),
             ms: 100,
             unix: Some(1000),
             sample: HardwareSample {
@@ -56,12 +80,21 @@ impl Default for Hardware {
                 privacy: Reading::Known(false),
                 battery_percent: Reading::Known(80),
             },
+            sample_override: Default::default(),
+            monotonic_override: Default::default(),
+            wall_override: Default::default(),
+            wall_reads: Cell::new(0),
+            wall_tick_on_read: Cell::new(None),
+            wall_samples: Default::default(),
             actions: Vec::new(),
+            action_id: None,
             fail_start: false,
+            fail_stop: false,
             stop_count: 0,
             reboot: false,
             image: Vec::new(),
             boot: BootOutcome::Pending,
+            boot_candidate: None,
             activation_count: 0,
             fail_write: false,
             power_ok: true,
@@ -70,20 +103,35 @@ impl Default for Hardware {
 }
 impl DevicePlatform for Hardware {
     fn monotonic_ms(&self) -> u64 {
-        self.ms
+        self.monotonic_override.get().unwrap_or(self.ms)
     }
     fn wall_clock(&self) -> Option<ClockSample> {
-        self.unix.map(|t| ClockSample { lower: t, upper: t })
+        if let Some(sample) = self.wall_samples.borrow_mut().pop_front() {
+            return sample;
+        }
+        let read = self.wall_reads.get() + 1;
+        self.wall_reads.set(read);
+        if let Some((tick, time)) = self.wall_tick_on_read.get() {
+            if read == tick {
+                self.wall_override.set(Some(time));
+            }
+        }
+        self.wall_override
+            .get()
+            .or(self.unix)
+            .map(|t| ClockSample { lower: t, upper: t })
     }
     fn sensors(&self) -> HardwareSample {
-        self.sample
+        self.sample_override.get().unwrap_or(self.sample)
     }
     fn start_action(
         &mut self,
+        id: ActuationId,
         target: ActionTarget,
         _duration: u32,
         _hold: bool,
     ) -> Result<(), Error> {
+        self.action_id = Some(id);
         self.actions.push(target);
         if self.fail_start {
             Err(Error::ActuatorFailed)
@@ -95,11 +143,16 @@ impl DevicePlatform for Hardware {
         }
     }
     fn stop_action(&mut self) -> Result<(), Error> {
+        self.trace.borrow_mut().push("stop");
         self.stop_count += 1;
+        if self.fail_stop {
+            return Err(Error::ActuatorFailed);
+        }
         Ok(())
     }
     fn set_wall_clock(&mut self, t: u64) -> Result<(), Error> {
         self.unix = Some(t);
+        self.wall_override.set(None);
         Ok(())
     }
     fn request_reboot(&mut self) -> Result<(), Error> {
@@ -162,11 +215,16 @@ impl Bootloader for Hardware {
             return Err(Error::FirmwareInvalid);
         }
         self.activation_count += 1;
+        self.boot_candidate = Some(m.clone());
         self.boot = BootOutcome::Pending;
         Ok(())
     }
-    fn outcome(&mut self) -> Result<BootOutcome, Error> {
-        Ok(self.boot)
+    fn outcome(&mut self, candidate: &FirmwareManifest) -> Result<BootOutcome, Error> {
+        Ok(if self.boot_candidate.as_ref() == Some(candidate) {
+            self.boot
+        } else {
+            BootOutcome::RolledBack
+        })
     }
     fn abort(&mut self) -> Result<(), Error> {
         self.image.clear();
@@ -260,6 +318,8 @@ pub fn claim(d: &mut Device) {
 pub fn ready() -> Device {
     let mut d = fresh();
     claim(&mut d);
+    // Operation tests count stops after the startup safety stop.
+    d.platform_mut().stop_count = 0;
     d
 }
 pub fn send(d: &mut Device, seq: u64, action: Action) -> Response {
@@ -272,7 +332,8 @@ pub fn send(d: &mut Device, seq: u64, action: Action) -> Response {
 }
 pub fn complete(d: &mut Device, bolt: BoltState) {
     d.platform_mut().sample.bolt = Reading::Known(bolt);
-    d.actuator_finished(ActuatorResult::Completed).unwrap();
+    d.actuator_finished(d.platform().action_id.unwrap(), ActuatorResult::Completed)
+        .unwrap();
 }
 pub fn success(r: Response) -> OperationStatus {
     match r.result {

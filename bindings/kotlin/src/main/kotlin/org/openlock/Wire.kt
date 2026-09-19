@@ -28,8 +28,9 @@ internal sealed class Wire {
     fun bool(): Boolean = number().also { require(it <= 1u) } == 1uL
     fun optional(): ULong? = if (this == Null) null else number()
     companion object {
-        fun decode(data: ByteArray): Wire {
-            require(data.size <= 4096); var offset = 0
+        const val MAX_EVENT_SIZE = 4160
+        fun decode(data: ByteArray, maxSize: Int = 4096): Wire {
+            require(data.size <= maxSize); var offset = 0
             fun byte(): Int { require(offset < data.size); return data[offset++].toInt() and 255 }
             fun parse(depth: Int): Wire {
                 require(depth < 32); val h = byte(); if (h == 0xf6) return Null

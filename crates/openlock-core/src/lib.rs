@@ -36,6 +36,7 @@ pub struct LockState<S> {
     pub issuer: VerifyingKey,
     pub snapshot: LockSnapshot,
     storage: S,
+    poisoned: bool,
 }
 impl<S: PersistentState> LockState<S> {
     pub fn new(lock_id: LockId, issuer: VerifyingKey, storage: S) -> Self {
@@ -49,9 +50,11 @@ impl<S: PersistentState> LockState<S> {
                 usage: BTreeMap::new(),
             },
             storage,
+            poisoned: false,
         }
     }
     pub fn apply_policy(&mut self, update: &PolicyUpdate, signature: &[u8]) -> Result<(), Error> {
+        self.ensure_healthy()?;
         if update.lock_id != self.lock_id
             || update.epoch < self.snapshot.epoch
             || (update.epoch == self.snapshot.epoch
@@ -69,8 +72,7 @@ impl<S: PersistentState> LockState<S> {
         }
         next.policy_version = update.version;
         next.revoked.extend(update.revoked.iter().copied());
-        self.storage.commit(&next)?;
-        self.snapshot = next;
+        self.commit(next)?;
         Ok(())
     }
     pub fn authorize(
@@ -99,6 +101,7 @@ impl<S: PersistentState> LockState<S> {
         requested_use: Option<u32>,
         required_rights: u32,
     ) -> Result<Decision, Error> {
+        self.ensure_healthy()?;
         if grant.lock_id != self.lock_id {
             return Err(Error::WrongLock);
         }
@@ -160,6 +163,7 @@ impl<S: PersistentState> LockState<S> {
         }))
     }
     pub fn consume(&mut self, grant: &Grant, decision: Decision) -> Result<(), Error> {
+        self.ensure_healthy()?;
         if let Decision::Authorized(Authorization::Counted { used, max }) = decision {
             if grant.max_uses != Some(max) {
                 return Err(Error::InvalidConsumption);
@@ -172,13 +176,27 @@ impl<S: PersistentState> LockState<S> {
                 return Err(Error::UsageExhausted);
             }
             next.usage.insert(grant.credential_id, used + 1);
-            self.storage.commit(&next)?;
-            self.snapshot = next;
+            self.commit(next)?;
         }
         Ok(())
     }
     pub fn storage(&self) -> &S {
         &self.storage
+    }
+    fn ensure_healthy(&self) -> Result<(), Error> {
+        if self.poisoned {
+            Err(Error::StorageUnavailable)
+        } else {
+            Ok(())
+        }
+    }
+    fn commit(&mut self, next: LockSnapshot) -> Result<(), Error> {
+        if self.storage.commit(&next).is_err() {
+            self.poisoned = true;
+            return Err(Error::StorageUnavailable);
+        }
+        self.snapshot = next;
+        Ok(())
     }
 }
 pub fn sign_grant(key: &ed25519_dalek::SigningKey, grant: &Grant) -> Result<Vec<u8>, Error> {
@@ -303,5 +321,53 @@ mod tests {
             Err(Error::InvalidConsumption)
         );
         assert!(!actuated);
+    }
+    #[test]
+    fn ambiguous_legacy_commits_disable_authorization_and_consumption() {
+        #[derive(Default)]
+        struct FailingStore {
+            persisted: Option<LockSnapshot>,
+        }
+        impl PersistentState for FailingStore {
+            fn commit(&mut self, state: &LockSnapshot) -> Result<(), Error> {
+                self.persisted = Some(state.clone());
+                Err(Error::StorageUnavailable)
+            }
+        }
+        for revoke in [false, true] {
+            let (key, grant) = fixture();
+            let sig = sign_grant(&key, &grant).unwrap();
+            let mut lock =
+                LockState::new(grant.lock_id, key.verifying_key(), FailingStore::default());
+            let decision = lock
+                .authorize(&grant, &sig, grant.subject_key, None, Some(0))
+                .unwrap();
+            let policy = PolicyUpdate {
+                lock_id: grant.lock_id,
+                epoch: 0,
+                version: 1,
+                revoked: [grant.credential_id].into_iter().collect(),
+            };
+            let signed = sign_policy(&key, &policy).unwrap();
+            let failed = if revoke {
+                lock.apply_policy(&policy, &signed)
+            } else {
+                lock.consume(&grant, decision.clone())
+            };
+            assert_eq!(failed, Err(Error::StorageUnavailable));
+            assert!(lock.storage().persisted.is_some());
+            assert_eq!(
+                lock.authorize(&grant, &sig, grant.subject_key, None, Some(0)),
+                Err(Error::StorageUnavailable)
+            );
+            assert_eq!(
+                lock.consume(&grant, decision),
+                Err(Error::StorageUnavailable)
+            );
+            assert_eq!(
+                lock.apply_policy(&policy, &signed),
+                Err(Error::StorageUnavailable)
+            );
+        }
     }
 }

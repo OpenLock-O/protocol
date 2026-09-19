@@ -24,9 +24,12 @@ Use one controller for a physical device across every connection and local
 management path. Serialize calls. Do not make a controller per connection or
 share storage between independent controllers without serialization.
 
-The runtime crates support `no_std + alloc`. Disable default features on every
-runtime dependency; Cargo feature unification can otherwise restore `std`.
-Firmware supplies the allocator, panic handler, entropy source, storage and I/O.
+The runtime crates use `std` by default, including on ESP32 with ESP-IDF. They also
+support `no_std + alloc` for bare-metal firmware: disable default features on every
+runtime dependency in that case; Cargo feature unification can otherwise restore
+`std`. Bare-metal firmware supplies the allocator, panic handler and entropy source.
+ESP-IDF supplies these through its Rust `std` integration. Both paths require
+platform storage and I/O implementations.
 The issuer and FFI are host libraries. The simulator uses `std` and deterministic
 test identities; it is not board firmware.
 
@@ -50,6 +53,12 @@ physical confirmations are separate trusted local methods.
 
 ### Platform interfaces
 
+C ABI events include the authenticated peer key and can be larger than their
+encrypted wire packet. Packets remain bounded by `OPENLOCK_MAX_MESSAGE_SIZE`
+(4096 bytes); local event buffers use `OPENLOCK_MAX_EVENT_SIZE` (4160 bytes) or
+the size returned by `openlock_session_take_event` with NULL/0. A short buffer
+leaves the complete event queued for a subsequent drain.
+
 | Interface | Required behavior |
 | --- | --- |
 | `DeviceStorage::load` | Return the latest integrity-checked record; distinguish absent storage from read failure or corruption. |
@@ -58,13 +67,17 @@ physical confirmations are separate trusted local methods.
 | `wall_clock` / `set_wall_clock` | Trusted Unix-second interval and privileged clock adjustment. Missing RTC validity is `None`. |
 | `sensors` | Actual readings matching the advertised hardware, including unknown/unavailable values. |
 | `start_action` | Start once without waiting for radio progress. Enforce pulse maximum time in hardware. |
-| `stop_action` | Stop an in-progress drive, or report failure so the controller cannot accept another drive. |
+| `stop_action` | Quiesce the drive, including as the first step of every constructor before configuration validation or storage access. It must safely succeed when already idle, or report failure so initialization/movement cannot continue. |
 | `request_reboot` | Schedule reboot after response delivery or a bounded transmission deadline. |
 | `has_device_private_key` | Confirm securely installed private material for the proposed rotation public key. |
 | `bootloader` | Return a backend only when signed staging, boot verification and recoverable trials are implemented. |
 
 Successful `start_action` means started, not physically unlocked. Complete through
-`actuator_finished`, with a fresh sensor sample. Mechanical/manual transitions
+`actuator_finished(id, result)`, with a fresh sensor sample and the exact
+`ActuationId` passed to `start_action`. Capture that ID in the driver operation
+and its queued callback; never replace it with the latest ID on delivery. IDs
+remain distinct across reboots and ownership changes. Stale callbacks return
+`InvalidState` without releasing or completing the current drive. Mechanical/manual transitions
 use `hardware_changed` even when no wireless action is active. Door state and
 bolt state are never inferred from each other. Periodic calls must meet configured
 timeout/reminder resolution; firmware must make pulse safety independent of this
@@ -84,6 +97,16 @@ reading. The controller validates loaded fields and retained firmware signatures
 A commit error poisons the in-memory instance because either the previous or new
 record may be durable. Reopen from authoritative state; never restore defaults.
 
+The authorization clock watermark never decreases in a snapshot commit.
+`SetClock` checks the latest durable watermark and trusted RTC again after
+acceptance, so a tick during persistence cannot revive an expired credential.
+Timed authorization and key-rotation checks use the exact clock interval whose
+lower bound was persisted, including when the check rejects a credential. A
+subsequent RTC read during audit cannot erase an observed expiration or restore
+trust after an observed missing/rolled-back time.
+Mutation preflight checks the grant again against its latest clock observation
+before reserving a sequence or use.
+
 `provision` only accepts an absent store. `open` only accepts an existing valid
 store. `migrate_legacy` explicitly copies a v2 `LockSnapshot` into a new v4 store,
 including epoch, policy version, revocations and consumed uses. Supply issuer,
@@ -91,16 +114,37 @@ current device keys and first-admin identity from trusted provisioning. Retain
 the old store until the new record commits. Insufficient capacity fails migration
 rather than dropping data. Wire upgrades do not reset authorization state.
 
+Client-side `TrustStore` also fails closed after an ambiguous commit: `get` returns
+no trusted record, and mutations and `snapshot` return `StorageUnavailable`.
+Reload the complete integrity-checked durable snapshot with `from_snapshot`;
+do not reconstruct an empty trust store from discovery records after an error.
+
+
 Persist sequence watermarks even after operation results are evicted. A result
 cache is not a sufficient replay barrier. Reusing a credential ID for changed
 grant contents in one epoch is rejected after its first mutation. Issue a new ID
-for a changed grant. Revocation/policy epochs provide explicit domain changes.
+for a changed grant. Revocation/policy epochs provide explicit domain changes. Authorized epoch
+changes, issuer replacement and physically confirmed reset atomically replace
+the old domain without first allocating a credential or result slot. They remain
+available at full capacity; the new epoch itself prevents old-grant replay.
 
 The actuator owner remains exclusive after an ambiguous start error. On reboot,
 accepted/running operations become Unknown and are not driven again. A pending
 automatic relock is evaluated from fresh door readings, with its intent treated
 as due. Once a relock attempt has durably claimed the intent, another reboot does
 not replay that drive. Recovery may consume a use without opening the lock.
+
+After durable acceptance, both manual and automatic drives re-sample physical
+interlocks immediately before starting, with no intervening storage access.
+If the door or privacy input changes during the acceptance write, the operation
+fails without driving; its durable sequence/use reservation remains consumed.
+The actuator timeout starts from this post-commit check. Platform drivers must
+still enforce electrical interlocks and pulse limits at the hardware boundary.
+If that sample already confirms the target bolt position, completion records
+sensor evidence without starting a drive; an already reserved unlock use remains
+consumed. Unrelated configuration changes preserve a pending relock and its
+deadline even without a reliable bolt reading. Changes to relock/hold-open policy
+explicitly reschedule or cancel the obligation according to the new policy.
 
 ### Commissioning and physical confirmation
 
@@ -130,15 +174,119 @@ readiness. Writes below the acknowledged offset are only duplicate reads; writes
 at the acknowledged offset can repeat after a lost acknowledgment. Make that
 retry safe for the selected flash technology, or require abort/restart.
 
+Aborting first commits an empty transfer record, then calls `Bootloader::abort`
+to erase staging. A reset or ambiguous failure therefore leaves either the old
+record with its bytes untouched, or an empty record that cannot advertise erased
+bytes as resumable or verified. A subsequent begin may replace orphaned staging.
+
 `activate` receives both the manifest and its signed COSE bytes. The bootloader
 independently validates them under its provisioned firmware root, checks the
 hardware target/security policy and uses A/B partitions or an equivalent recovery
-scheme. It must report Pending while a trial is unresolved, Confirmed only after
-successful boot confirmation, and RolledBack after restoring the previous image.
+scheme. Its `outcome(candidate)` must use durable boot metadata for that exact manifest,
+including its hash and security version. Report Pending while that candidate is
+unresolved, Confirmed only after its successful boot confirmation, and RolledBack
+after restoring the previous image or when the candidate was never activated.
+A prior image’s confirmation must never confirm a newly staged candidate.
 An activation error may still have scheduled a boot; keep the outcome truthful
 and resolve it through the same interface, including across resets. The network
 cannot assert boot success. The protocol commits a new security floor only after
 Confirmed. Do not advertise firmware commands with a nonrecoverable backend.
+
+### ESP32 with ESP-IDF and std
+
+Use an ESP-IDF 5+ application and leave OpenLock's default `std` features enabled.
+The runtime libraries use the same protocol and controller implementation as the
+host. There is no ESP32-specific `no_std` feature or custom RNG callback to supply.
+
+| Chip | Rust target | Rust toolchain |
+| --- | --- | --- |
+| ESP32 | `xtensa-esp32-espidf` | Espressif `esp` |
+| ESP32-S2 | `xtensa-esp32s2-espidf` | Espressif `esp` |
+| ESP32-S3 | `xtensa-esp32s3-espidf` | Espressif `esp` |
+| ESP32-C2 / C3 | `riscv32imc-esp-espidf` | `nightly` with `rust-src` |
+| ESP32-C6 / H2 | `riscv32imac-esp-espidf` | `nightly` with `rust-src` |
+
+These are OS targets, separate from the `*-unknown-none-elf` bare-metal targets.
+ESP32-S2 has no Bluetooth radio; use a supported external transport on that chip.
+Select the ESP-IDF release and `MCU` for the actual board (C6/H2 require at least
+ESP-IDF 5.1). See the [Rust ESP-IDF target guide](https://doc.rust-lang.org/rustc/platform-support/esp-idf.html).
+
+Devenv provides `rustup` and `espup`. Install the extra toolchains once; this does
+not change the workspace's normal stable Rust compiler:
+
+```sh
+devenv shell -- espup install --std --targets esp32,esp32s2,esp32s3
+devenv shell -- rustup toolchain install nightly --profile minimal --component rust-src
+
+# The first build also downloads the standard library's Cargo dependencies.
+devenv shell -- sh -c '. "$HOME/export-esp.sh"; CARGO_NET_OFFLINE=false esp32-check'
+
+# Subsequent builds can use the cached dependencies; choose one target if desired.
+devenv shell -- sh -c '. "$HOME/export-esp.sh"; esp32-check xtensa-esp32-espidf'
+```
+
+Outside Devenv, install `rustup` and `espup` following the
+[ESP Rust toolchain instructions](https://docs.espressif.com/projects/rust/book/getting-started/toolchain.html),
+then use `bash scripts/check-esp32.sh` from the repository root. The script
+accepts one or more target triples and defaults to all five targets in the table.
+`ESP_XTENSA_TOOLCHAIN` and `ESP_RISCV_TOOLCHAIN` can select installed toolchain
+versions instead of `esp` and `nightly`.
+
+The check compiles release `.rlib` libraries with `-Zbuild-std=std,panic_abort`.
+It verifies machine-code generation for all runtime crates, without linking a
+complete firmware image or requiring the ESP-IDF SDK. Final firmware linking and
+hardware behavior must be validated in the board application.
+
+For a board application, start from the
+[ESP-IDF Rust template](https://github.com/esp-rs/esp-idf-template), which provides
+`esp-idf-sys`/`esp-idf-svc`, startup, SDK configuration and build-script link
+integration. Add OpenLock dependencies with `std` enabled (paths below assume the
+application is next to the `protocol` checkout):
+
+```toml
+[dependencies]
+openlock-core = { path = "../protocol/crates/openlock-core", features = ["std"] }
+openlock-protocol = { path = "../protocol/crates/openlock-protocol", features = ["std"] }
+openlock-types = { path = "../protocol/crates/openlock-types", features = ["std"] }
+openlock-transport-ble = { path = "../protocol/crates/openlock-transport-ble", features = ["std"] }
+```
+
+Cargo does not inherit configuration from dependencies. Keep these settings in
+the application's `.cargo/config.toml`, along with the template's MCU/SDK settings:
+
+```toml
+[build]
+target = "xtensa-esp32-espidf"
+
+[target.'cfg(target_os = "espidf")']
+linker = "ldproxy"
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+```
+
+`espidf_time64` matches ESP-IDF 5+'s 64-bit `time_t` ABI. Install `ldproxy` for
+final linking (`cargo install ldproxy --locked`) and call the template's
+`esp_idf_sys::link_patches()` (or `esp_idf_svc::sys::link_patches()`) at startup.
+The repository scopes its ABI flags to ESP-IDF targets and passes `build-std`
+only in the ESP32 check, so host and bare-metal builds keep their normal settings.
+
+Noise's `getrandom` 0.3 dependency automatically uses ESP-IDF's `esp_fill_random`.
+Before generating keys or starting a Noise handshake, ensure the chip's hardware
+entropy source is active. On ESP32, that requires active Wi-Fi/Bluetooth or the
+internal entropy source enabled under ESP-IDF's ADC/I2S/RF restrictions. This also
+applies to NFC-only operation and radio sleep: `std` and `esp_fill_random` alone
+do not ensure fresh entropy. See the
+[ESP-IDF RNG requirements](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/random.html).
+Do not select `getrandom_backend="custom"` for this path.
+
+Implement `DeviceStorage` with explicit, integrity-checked serialization and atomic
+durable commits, and `DevicePlatform` with board clocks, sensors and actuator
+drivers. BLE/NFC framing remains transport-neutral; firmware supplies the actual
+ESP-IDF radio or reader I/O. Keep controller access serialized across FreeRTOS
+tasks and CPU cores, and only expose firmware-update capabilities after implementing
+the verifying, recoverable `Bootloader` contract above.
 
 ### Bare-metal targets and RNG
 

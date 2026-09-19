@@ -51,7 +51,8 @@ clock maintenance and factory reset. Swift/Kotlin additionally exercise device-k
 rotation and reconnection using the new key. Test keys are deterministic and must
 never be used in a device.
 
-The runtime crates support `no_std + alloc`. Devenv installs and CI builds these
+The runtime crates support both `std` (the default, including ESP32 with ESP-IDF)
+and `no_std + alloc`. Devenv installs and CI builds these
 bare-metal targets, including optimized machine-code generation:
 
 | Architecture | Rust target |
@@ -67,6 +68,24 @@ Cargo configuration selects the custom entropy backend on bare-metal ARM/RISC-V.
 Firmware must provide a secure RNG callback, allocator, startup/linker configuration
 and board I/O; see the [integration guide](docs/architecture.md#bare-metal-targets-and-rng).
 Issuer, FFI and the executable simulator are host tools.
+
+ESP32 uses **ESP-IDF 5+ with `std`**. A separate CI job builds all seven runtime
+libraries in release mode for these ESP-IDF targets:
+
+| Chip | Rust target |
+| --- | --- |
+| ESP32 | `xtensa-esp32-espidf` |
+| ESP32-S2 | `xtensa-esp32s2-espidf` |
+| ESP32-S3 | `xtensa-esp32s3-espidf` |
+| ESP32-C2 / C3 | `riscv32imc-esp-espidf` |
+| ESP32-C6 / H2 | `riscv32imac-esp-espidf` |
+
+After installing the ESP toolchains, run `devenv shell -- esp32-check`, or pass
+one of the targets above to build only that target. This builds `std` from source
+and keeps the runtime crates' default features enabled. See the
+[ESP32 setup and integration instructions](docs/architecture.md#esp32-with-esp-idf-and-std)
+for toolchain installation, dependency configuration and ESP-IDF entropy requirements.
+
 The Devenv environment includes Rust, Swift, Kotlin, Gradle, JDK 17, CMake and JNI
 headers. `JDK17_HOME` explicitly selects the declared Java toolchain for Gradle.
 The Swift integration runner is an executable, so it does not require XCTest.

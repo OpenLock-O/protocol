@@ -106,6 +106,8 @@ pub struct TrustSnapshot {
     pub devices: BTreeMap<LockId, DeviceKeyRecord>,
 }
 pub trait TrustStorage {
+    /// Persist atomically. An error may still have written the snapshot and
+    /// makes the TrustStore unusable until restored from authoritative storage.
     fn commit(&mut self, snapshot: &TrustSnapshot) -> Result<(), Error>;
 }
 impl TrustStorage for () {
@@ -118,6 +120,7 @@ pub struct TrustStore<S> {
     issuer: VerifyingKey,
     snapshot: TrustSnapshot,
     storage: S,
+    poisoned: bool,
 }
 impl<S: TrustStorage> TrustStore<S> {
     pub fn new(issuer: VerifyingKey, storage: S) -> Self {
@@ -127,9 +130,34 @@ impl<S: TrustStorage> TrustStore<S> {
                 devices: BTreeMap::new(),
             },
             storage,
+            poisoned: false,
         }
     }
+    /// Restore the complete integrity-checked durable snapshot without replacing
+    /// it with an empty store. Unsigned pinned records rely on storage integrity.
+    pub fn from_snapshot(
+        issuer: VerifyingKey,
+        storage: S,
+        snapshot: TrustSnapshot,
+    ) -> Result<Self, Error> {
+        for (id, record) in &snapshot.devices {
+            if *id != record.key.device_id {
+                return Err(Error::StorageUnavailable);
+            }
+            validate_device_key(&record.key)?;
+            if !record.signature.is_empty() {
+                verify_device_key(&issuer, record)?;
+            }
+        }
+        Ok(Self {
+            issuer,
+            snapshot,
+            storage,
+            poisoned: false,
+        })
+    }
     pub fn import(&mut self, record: DeviceKeyRecord) -> Result<(), Error> {
+        self.ensure_healthy()?;
         verify_device_key(&self.issuer, &record)?;
         if let Some(old) = self.snapshot.devices.get(&record.key.device_id) {
             if old.key.key_id != record.key.key_id || record.key.key_version <= old.key.key_version
@@ -139,11 +167,10 @@ impl<S: TrustStorage> TrustStore<S> {
         }
         let mut next = self.snapshot.clone();
         next.devices.insert(record.key.device_id, record);
-        self.storage.commit(&next)?;
-        self.snapshot = next;
-        Ok(())
+        self.commit(next)
     }
     pub fn pin(&mut self, key: DeviceKey) -> Result<(), Error> {
+        self.ensure_healthy()?;
         validate_device_key(&key)?;
         if let Some(old) = self.snapshot.devices.get(&key.device_id) {
             if old.key.key_id != key.key_id || key.key_version <= old.key.key_version {
@@ -157,11 +184,10 @@ impl<S: TrustStorage> TrustStore<S> {
         };
         let mut next = self.snapshot.clone();
         next.devices.insert(record.key.device_id, record);
-        self.storage.commit(&next)?;
-        self.snapshot = next;
-        Ok(())
+        self.commit(next)
     }
     pub fn apply_update(&mut self, update: &KeyUpdate, now: ClockSample) -> Result<(), Error> {
+        self.ensure_healthy()?;
         now.validate()?;
         let old = self
             .snapshot
@@ -189,15 +215,32 @@ impl<S: TrustStorage> TrustStore<S> {
         let mut next = self.snapshot.clone();
         next.devices
             .insert(update.new_record.key.device_id, update.new_record.clone());
-        self.storage.commit(&next)?;
-        self.snapshot = next;
-        Ok(())
+        self.commit(next)
     }
     pub fn get(&self, device: &LockId) -> Option<&DeviceKeyRecord> {
+        if self.poisoned {
+            return None;
+        }
         self.snapshot.devices.get(device)
     }
-    pub fn snapshot(&self) -> &TrustSnapshot {
-        &self.snapshot
+    pub fn snapshot(&self) -> Result<&TrustSnapshot, Error> {
+        self.ensure_healthy()?;
+        Ok(&self.snapshot)
+    }
+    fn ensure_healthy(&self) -> Result<(), Error> {
+        if self.poisoned {
+            Err(Error::StorageUnavailable)
+        } else {
+            Ok(())
+        }
+    }
+    fn commit(&mut self, next: TrustSnapshot) -> Result<(), Error> {
+        if self.storage.commit(&next).is_err() {
+            self.poisoned = true;
+            return Err(Error::StorageUnavailable);
+        }
+        self.snapshot = next;
+        Ok(())
     }
 }
 
@@ -361,5 +404,95 @@ mod tests {
             .unwrap();
         assert_eq!(store.get(&LockId([1; 16])).unwrap().key.key_version, 2);
         assert_eq!(store.pin(first), Err(Error::StaleKey));
+    }
+    #[test]
+    fn ambiguous_commits_disable_all_trust_paths_until_durable_restore() {
+        use alloc::rc::Rc;
+        use core::cell::{Cell, RefCell};
+        #[derive(Clone, Default)]
+        struct Store {
+            state: Rc<RefCell<Option<TrustSnapshot>>>,
+            fail: Rc<Cell<bool>>,
+            after_write: Rc<Cell<bool>>,
+        }
+        impl TrustStorage for Store {
+            fn commit(&mut self, next: &TrustSnapshot) -> Result<(), Error> {
+                if !self.fail.get() || self.after_write.get() {
+                    *self.state.borrow_mut() = Some(next.clone());
+                }
+                if self.fail.get() {
+                    Err(Error::StorageUnavailable)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let issuer = SigningKey::from_bytes(&[5; 32]);
+        let id = LockId([1; 16]);
+        let record = |version| {
+            sign_device_key(
+                &issuer,
+                &DeviceKey {
+                    device_id: id,
+                    key_id: 1,
+                    key_version: version,
+                    x25519_public_key: crate::static_public(&[version as u8; 32]),
+                    rotation_public_key: issuer.verifying_key().to_bytes(),
+                    capabilities: 3,
+                },
+                9,
+            )
+            .unwrap()
+        };
+        for after_write in [false, true] {
+            for method in 0..3 {
+                let access = Store::default();
+                let mut trust = TrustStore::new(issuer.verifying_key(), access.clone());
+                trust.import(record(1)).unwrap();
+                let update = sign_key_update(
+                    &issuer,
+                    KeyUpdate {
+                        old_key_id: 1,
+                        new_record: record(3),
+                        not_before: 10,
+                        retire_after: 20,
+                        issuer_key_id: Some(9),
+                        signature: Vec::new(),
+                    },
+                )
+                .unwrap();
+                let now = ClockSample {
+                    lower: 10,
+                    upper: 10,
+                };
+                access.fail.set(true);
+                access.after_write.set(after_write);
+                let result = match method {
+                    0 => trust.import(record(3)),
+                    1 => trust.pin(record(3).key),
+                    _ => trust.apply_update(&update, now),
+                };
+                assert_eq!(result, Err(Error::StorageUnavailable));
+                assert!(trust.get(&id).is_none());
+                assert_eq!(trust.snapshot(), Err(Error::StorageUnavailable));
+                access.fail.set(false);
+                assert_eq!(trust.import(record(2)), Err(Error::StorageUnavailable));
+                assert_eq!(trust.pin(record(2).key), Err(Error::StorageUnavailable));
+                assert_eq!(
+                    trust.apply_update(&update, now),
+                    Err(Error::StorageUnavailable)
+                );
+                let snapshot = access.state.borrow().clone().unwrap();
+                let mut restored =
+                    TrustStore::from_snapshot(issuer.verifying_key(), access, snapshot).unwrap();
+                assert_eq!(
+                    restored.get(&id).unwrap().key.key_version,
+                    if after_write { 3 } else { 1 }
+                );
+                if after_write {
+                    assert_eq!(restored.import(record(2)), Err(Error::StaleKey));
+                }
+            }
+        }
     }
 }

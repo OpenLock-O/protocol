@@ -59,7 +59,7 @@ sealed class SessionEvent {
     data class Request(val id: ULong, val peer: ByteArray, val credential: ByteArray, val sequence: ULong?, val action: LockAction) : SessionEvent()
     data class Response(val id: ULong, val value: LockResponse) : SessionEvent()
     companion object {
-        internal fun parse(data: ByteArray): SessionEvent { val f = Wire.decode(data).fields(4); return when (f[0].number()) {
+        internal fun parse(data: ByteArray): SessionEvent { val f = Wire.decode(data, Wire.MAX_EVENT_SIZE).fields(4); return when (f[0].number()) {
             1uL -> Handshake(f[2].bytes())
             2uL -> f[3].fields(3).let { Request(f[1].number(),f[2].bytes(),it[0].bytes(),it[1].optional(),LockAction.parse(it[2])) }
             3uL -> Response(f[1].number(),LockResponse(f[3]))

@@ -16,7 +16,7 @@ members = [
 version = "0.4.0"
 edition = "2021"
 license = "LGPL-3.0-or-later"
-rust-version = "1.81"
+rust-version = "1.85"
 
 [workspace.dependencies]
 openlock-types = { path = "crates/openlock-types", default-features = false }

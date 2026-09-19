@@ -52,7 +52,7 @@ JNIEXPORT jbyteArray JNICALL Java_org_openlock_Native_send(JNIEnv *env,jclass ty
 }
 JNIEXPORT jobjectArray JNICALL Java_org_openlock_Native_receive(JNIEnv *env,jclass type,jlong handle,jbyteArray packet){
     (void)type;openlock_session_t *s=session(env,handle);if(!s)return NULL;
-    uint8_t input[4096],event[4096],reply[4096];jsize count;size_t event_len=0,reply_len=0;
+    uint8_t input[OPENLOCK_MAX_MESSAGE_SIZE],event[OPENLOCK_MAX_EVENT_SIZE],reply[OPENLOCK_MAX_MESSAGE_SIZE];jsize count;size_t event_len=0,reply_len=0;
     if(!read(env,packet,input,sizeof input,&count))return NULL;
     int32_t code=openlock_session_receive(s,input,(size_t)count);
     if(!code)code=openlock_session_take_event(s,event,sizeof event,&event_len);

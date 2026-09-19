@@ -14,3 +14,6 @@ openlock-protocol = { workspace = true, features = ["std"] }
 openlock-types = { workspace = true, features = ["std"] }
 
 openlock-crypto = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+snow.workspace = true

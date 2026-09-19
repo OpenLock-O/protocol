@@ -14,6 +14,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  msrv:
+    name: Minimum supported Rust (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Install Rust 1.85
+        run: rustup toolchain install 1.85.0 --profile minimal
+      - name: Check workspace at the declared minimum
+        run: cargo +1.85.0 check --locked --workspace --all-targets
+
   rust:
     name: Rust workspace
     runs-on: ubuntu-latest
@@ -47,6 +58,27 @@ jobs:
 
       - name: Test no_std and build ARM / RISC-V runtime libraries
         run: devenv shell -- no-std-check
+
+  esp32:
+    name: ESP32 / ESP-IDF (std)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust for Xtensa
+        uses: esp-rs/xtensa-toolchain@v1.6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          buildtargets: esp32,esp32s2,esp32s3
+          override: false
+
+      - name: Install Rust for RISC-V ESP-IDF
+        run: rustup toolchain install nightly --profile minimal --component rust-src
+
+      - name: Build ESP-IDF runtime libraries with std
+        run: bash scripts/check-esp32.sh
 
   bindings:
     name: Swift, Kotlin and JNI bindings

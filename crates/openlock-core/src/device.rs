@@ -62,6 +62,13 @@ pub trait DeviceStorage {
     fn commit(&mut self, next: &DeviceSnapshot) -> Result<(), Error>;
 }
 pub type HardwareSample = HardwareState;
+/// Opaque identity for one physical drive. Preserve it when queuing completion
+/// callbacks; a notification from any earlier drive must not complete a new one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActuationId {
+    generation: u64,
+    audit_cursor: u64,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActuatorResult {
     Completed,
@@ -84,7 +91,9 @@ pub trait Bootloader {
     fn image_hash(&mut self, size: u64) -> Result<[u8; 32], Error>;
     fn ready_to_activate(&mut self) -> Result<(), Error>;
     fn activate(&mut self, manifest: &FirmwareManifest, signed: &[u8]) -> Result<(), Error>;
-    fn outcome(&mut self) -> Result<BootOutcome, Error>;
+    /// Return the durable boot outcome for this exact candidate, never a prior
+    /// image. A candidate known never to have been activated is RolledBack.
+    fn outcome(&mut self, candidate: &FirmwareManifest) -> Result<BootOutcome, Error>;
     fn abort(&mut self) -> Result<(), Error>;
 }
 /// Platform callbacks never derive trust or physical presence from network input.
@@ -96,10 +105,13 @@ pub trait DevicePlatform {
     /// host stops polling or loses power. hold_open requires a suitable mechanism.
     fn start_action(
         &mut self,
+        id: ActuationId,
         target: ActionTarget,
         release_ms: u32,
         hold_open: bool,
     ) -> Result<(), Error>;
+    /// Quiesce the drive, including before any storage access during startup.
+    /// Must be safe and succeed when the actuator is already idle.
     fn stop_action(&mut self) -> Result<(), Error>;
     fn set_wall_clock(&mut self, unix_seconds: u64) -> Result<(), Error>;
     /// Schedule reboot after the response has been transmitted, or its deadline.
@@ -117,7 +129,9 @@ pub struct SessionContext {
     pub peer: SubjectKey,
     pub generation: u64,
 }
+#[derive(Clone, Copy)]
 struct Active {
+    id: ActuationId,
     credential_id: CredentialId,
     sequence: u64,
     target: ActionTarget,
@@ -136,6 +150,9 @@ pub struct DeviceController<S, P> {
     state: DeviceSnapshot,
     poisoned: bool,
     sample: HardwareSample,
+    // Only an idle, observed Locked -> Unlocked transition is a new local
+    // unlock. Unknown -> Unlocked after a stopped drive is not a retry trigger.
+    last_idle_bolt: Option<BoltState>,
     fault: Fault,
     active: Option<Active>,
     last_mono: u64,
@@ -251,7 +268,12 @@ impl DeviceSnapshot {
 }
 impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
     /// Only for a genuinely absent store. Never use this as recovery from load failure.
-    pub fn provision(factory: FactoryIdentity, mut storage: S, platform: P) -> Result<Self, Error> {
+    pub fn provision(
+        factory: FactoryIdentity,
+        mut storage: S,
+        mut platform: P,
+    ) -> Result<Self, Error> {
+        platform.stop_action()?;
         factory.info.validate()?;
         if storage.load()?.is_some() {
             return Err(Error::AlreadyProvisioned);
@@ -259,18 +281,20 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         let state = DeviceSnapshot::factory(&factory);
         state.validate(&factory)?;
         storage.commit(&state)?;
-        Self::open(factory, storage, platform)
+        Self::open_stopped(factory, storage, platform)
     }
     /// Explicit migration into a NEW v4 store. Retain the old store until this
     /// transaction succeeds. Identity/root inputs come from trusted provisioning.
     pub fn migrate_legacy(
         factory: FactoryIdentity,
         mut storage: S,
-        platform: P,
+        mut platform: P,
         legacy: &crate::LockSnapshot,
         issuer: VerifyingKey,
         first_admin: SubjectKey,
     ) -> Result<Self, Error> {
+        platform.stop_action()?;
+        factory.info.validate()?;
         if storage.load()?.is_some() {
             return Err(Error::AlreadyProvisioned);
         }
@@ -286,31 +310,26 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         state.generation = 1;
         state.validate(&factory)?;
         storage.commit(&state)?;
-        Self::open(factory, storage, platform)
+        Self::open_stopped(factory, storage, platform)
     }
     pub fn open(factory: FactoryIdentity, storage: S, mut platform: P) -> Result<Self, Error> {
+        platform.stop_action()?;
+        Self::open_stopped(factory, storage, platform)
+    }
+    // Every public constructor quiesces the actuator before calling this helper.
+    fn open_stopped(factory: FactoryIdentity, storage: S, mut platform: P) -> Result<Self, Error> {
         factory.info.validate()?;
         let mut state = storage.load()?.ok_or(Error::NotProvisioned)?;
         state.validate(&factory)?;
         if factory.info.capabilities & (0x3f << 13) != 0 && platform.bootloader().is_none() {
             return Err(Error::InvalidConfig);
         }
-        if state.automatic_inflight
-            || state.operations.iter().any(|r| {
-                matches!(r.status.opcode, 0 | 3)
-                    && matches!(
-                        r.status.phase,
-                        OperationPhase::Accepted
-                            | OperationPhase::Running
-                            | OperationPhase::Unknown
-                    )
-            })
-        {
-            platform.stop_action()?;
-        }
         let interrupted_automatic = state.automatic_inflight;
         state.automatic_inflight = false;
         let sample = platform.sensors();
+        if sample.bolt == Reading::Known(BoltState::Locked) {
+            state.pending_relock = false;
+        }
         let last_mono = platform.monotonic_ms();
         for op in &mut state.operations {
             if matches!(
@@ -329,6 +348,10 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             state,
             poisoned: false,
             sample,
+            last_idle_bolt: match sample.bolt {
+                Reading::Known(bolt) => Some(bolt),
+                _ => None,
+            },
             fault: Fault::None,
             active: None,
             last_mono,
@@ -392,9 +415,12 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         if self.poisoned {
             return Err(Error::StorageUnavailable);
         }
+        if next.clock_floor < self.state.clock_floor {
+            return Err(Error::ClockRollback);
+        }
         next.validate(&self.factory)?;
         if self.storage.commit(&next).is_err() {
-            self.poisoned = true;
+            self.poison();
             return Err(Error::StorageUnavailable);
         }
         self.state = next;
@@ -402,18 +428,30 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
     }
     fn now(&mut self) -> Result<u64, Error> {
         if self.poisoned {
+            // Retry a failed stop even though persistence/authorization is closed.
+            self.stop_poisoned_action();
             return Err(Error::StorageUnavailable);
         }
         let now = self.platform.monotonic_ms();
         if now < self.last_mono {
-            self.poisoned = true;
+            self.poison();
             return Err(Error::ClockUntrusted);
         }
         self.last_mono = now;
         Ok(now)
     }
-    fn refresh_clock(&mut self) -> Result<(), Error> {
-        if let Some(sample) = self.platform.wall_clock() {
+    fn poison(&mut self) {
+        self.poisoned = true;
+        self.stop_poisoned_action();
+    }
+    fn stop_poisoned_action(&mut self) {
+        if self.active.is_some() && self.platform.stop_action().is_ok() {
+            self.active = None;
+        }
+    }
+    fn refresh_clock(&mut self) -> Result<Option<ClockSample>, Error> {
+        let observed = self.platform.wall_clock();
+        if let Some(sample) = observed {
             if sample.lower > sample.upper
                 || self
                     .state
@@ -435,18 +473,15 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             next.clock_valid = false;
             self.commit(next)?;
         }
-        Ok(())
+        // Return the exact sample whose lower bound was durably recorded.
+        Ok(observed.filter(|_| self.state.clock_valid))
     }
     fn wall(&self) -> Option<ClockSample> {
         if !self.state.clock_valid {
             return None;
         }
         self.platform.wall_clock().filter(|c| {
-            c.lower <= c.upper
-                && self
-                    .state
-                    .clock_floor
-                    .map_or(true, |floor| c.lower >= floor)
+            c.lower <= c.upper && self.state.clock_floor.is_none_or(|floor| c.lower >= floor)
         })
     }
     fn audit(
@@ -457,6 +492,7 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         sequence: Option<u64>,
         code: u32,
     ) -> Result<(), Error> {
+        self.record_wall(s);
         let cursor = s.next_cursor;
         s.next_cursor = cursor.checked_add(1).ok_or(Error::ResourceExhausted)?;
         s.events.push(AuditEvent {
@@ -554,7 +590,7 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         });
         Ok(())
     }
-    fn authorize(&self, context: SessionContext, c: &Command) -> Result<Grant, Error> {
+    fn authorize(&mut self, context: SessionContext, c: &Command) -> Result<Grant, Error> {
         if context.generation != self.state.generation {
             return Err(Error::InvalidState);
         }
@@ -577,7 +613,9 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             return Err(Error::Revoked);
         }
         if let Some(v) = grant.validity {
-            let now = self.wall().ok_or(Error::ClockUntrusted)?;
+            // Queries and replay lookups remain available after a sensor fault;
+            // the observation still stops any unsafe drive before persistence.
+            let now = self.observe_hardware(true)?.ok_or(Error::ClockUntrusted)?;
             if now.lower < v.not_before || now.upper >= v.not_after {
                 return Err(Error::Expired);
             }
@@ -614,6 +652,16 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         self.handle(self.context(peer), c)
     }
     fn dispatch(&mut self, context: SessionContext, c: &Command) -> Result<Reply, Error> {
+        // Every request, including queries and rejections, services observable
+        // actuator hazards before it can cause any persistence.
+        if let Err(error) = self.hardware_changed() {
+            // Sensor faults have already stopped the drive and sanitized the
+            // sample. Keep queries/replays available; mutation preflight still
+            // rejects a new action while the sensor fault persists.
+            if error != Error::SensorConflict {
+                return Err(error);
+            }
+        }
         let now = self.now()?;
         c.validate()?;
         Action::parse(&c.action.value())?;
@@ -641,7 +689,6 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         {
             return self.claim(context, setup_key, issuer, admin_credential, now);
         }
-        self.refresh_clock()?;
         let grant = self.authorize(context, c)?;
         if !c.action.mutates() {
             return self.query(&grant, &c.action);
@@ -668,6 +715,39 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             return Ok(Reply::Operation(previous.status.clone()));
         }
         self.preflight(&grant, c, now, digest, context.peer)?;
+        let status = OperationStatus {
+            credential_id: grant.credential_id,
+            sequence: seq,
+            opcode: c.action.opcode(),
+            phase: OperationPhase::Accepted,
+            evidence: CompletionEvidence::None,
+            error: 0,
+        };
+        let clears_domain = match &c.action {
+            Action::FactoryReset | Action::ReplaceIssuer(_) => true,
+            Action::ApplyPolicy(bytes) => {
+                let issuer = VerifyingKey::from_bytes(
+                    &self
+                        .state
+                        .owner
+                        .as_ref()
+                        .ok_or(Error::NotProvisioned)?
+                        .issuer,
+                )
+                .map_err(|_| Error::UntrustedKey)?;
+                read_policy(&issuer, bytes)?.epoch > self.state.epoch
+            }
+            _ => false,
+        };
+        if clears_domain {
+            // These operations have no external side effect before their one
+            // atomic domain replacement. The new epoch invalidates the sender's
+            // old grant, so no old-domain slot is needed for replay protection.
+            // Administrative recovery must remain possible at full capacity.
+            return self
+                .execute(context, c, &status, now)?
+                .ok_or(Error::InvalidState);
+        }
         let mut next = self.state.clone();
         if (!next.watermarks.contains_key(&grant.credential_id)
             && next.watermarks.len() >= self.factory.info.credential_capacity as usize)
@@ -694,20 +774,12 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 uses.checked_add(1).ok_or(Error::UsageExhausted)?,
             );
         }
-        let status = OperationStatus {
-            credential_id: grant.credential_id,
-            sequence: seq,
-            opcode: c.action.opcode(),
-            phase: OperationPhase::Accepted,
-            evidence: CompletionEvidence::None,
-            error: 0,
-        };
         if next.operations.len() >= self.factory.info.operation_capacity as usize {
             let idx = next
                 .operations
                 .iter()
                 .position(|r| {
-                    self.active.as_ref().map_or(true, |a| {
+                    self.active.as_ref().is_none_or(|a| {
                         a.credential_id != r.status.credential_id || a.sequence != r.status.sequence
                     }) && !matches!(
                         r.status.phase,
@@ -722,6 +794,17 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             status: status.clone(),
         });
         self.record_wall(&mut next);
+        if matches!(c.action, Action::Unlock) && !no_change {
+            // Reserve the relock obligation in the same durable acceptance as
+            // the unlock use; power may fail as soon as start_action is called.
+            self.schedule_relock(&mut next, now);
+        }
+        if matches!(c.action, Action::Lock) {
+            // A manual lock claims the same relock obligation as an automatic
+            // lock. A reboot must not retry either accepted physical action.
+            next.pending_relock = false;
+            self.relock_deadline = None;
+        }
         self.audit(
             &mut next,
             AuditKind::Operation,
@@ -771,7 +854,7 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         if self.state.owner.is_some() {
             return Err(Error::AlreadyProvisioned);
         }
-        if self.pairing_until.map_or(true, |until| now >= until) || self.pairing_failures >= 5 {
+        if self.pairing_until.is_none_or(|until| now >= until) || self.pairing_failures >= 5 {
             return Err(Error::PairingClosed);
         }
         if !openlock_crypto::constant_time_eq(&sha256(key), &self.factory.setup_key_hash) {
@@ -906,25 +989,66 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         }
     }
     fn can_lock(&self) -> Result<(), Error> {
+        self.can_lock_sample(self.sample)
+    }
+    fn can_lock_sample(&self, sample: HardwareSample) -> Result<(), Error> {
         if self.factory.info.actuator != ActuatorKind::Motor {
             return Err(Error::UnsupportedCapability);
         }
-        match self.sample.door {
+        match sample.door {
             Reading::Known(DoorState::Closed) => Ok(()),
             Reading::Known(DoorState::Open) => Err(Error::DoorOpen),
             Reading::Unsupported if self.factory.info.safe_lock_without_door => Ok(()),
             _ => Err(Error::SensorConflict),
         }
     }
+    /// Persistence may block while physical inputs change. This final gate must
+    /// not perform storage I/O between the fresh sample and actuator start.
+    fn prepare_actuation(&mut self, target: ActionTarget) -> Result<Option<u64>, Error> {
+        let now = self.now()?;
+        let sample = self.platform.sensors();
+        let expected = if target == ActionTarget::Lock {
+            BoltState::Locked
+        } else {
+            BoltState::Unlocked
+        };
+        let reached = sample.bolt == Reading::Known(expected);
+        let interlock = self.validate_sample(sample).and_then(|_| match target {
+            ActionTarget::Lock if !reached => self.can_lock_sample(sample),
+            ActionTarget::Lock => Ok(()),
+            ActionTarget::Unlock => match sample.privacy {
+                Reading::Known(true) => Err(Error::PrivacyActive),
+                Reading::Unknown => Err(Error::SensorConflict),
+                _ => Ok(()),
+            },
+        });
+        interlock?;
+        if reached {
+            self.sample.bolt = sample.bolt;
+            self.last_idle_bolt = Some(expected);
+            return Ok(None);
+        }
+        // Leave the cached observation intact so hardware_changed still records
+        // these transitions and updates door timers on the next service call.
+        now.checked_add(self.state.config.action_timeout_ms as u64)
+            .map(Some)
+            .ok_or(Error::InvalidState)
+    }
     fn preflight(
         &mut self,
-        _g: &Grant,
+        grant: &Grant,
         c: &Command,
         now: u64,
         digest: [u8; 32],
         peer: SubjectKey,
     ) -> Result<(), Error> {
-        self.hardware_changed()?;
+        let clock = self.observe_hardware(false)?;
+        if let Some(validity) = grant.validity {
+            let clock = clock.ok_or(Error::ClockUntrusted)?;
+            if clock.lower < validity.not_before || clock.upper >= validity.not_after {
+                return Err(Error::Expired);
+            }
+        }
         match &c.action {
             Action::Unlock | Action::Lock => {
                 if self.active.is_some() {
@@ -963,7 +1087,7 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 if self.state.clock_floor.is_some_and(|floor| *t < floor) {
                     return Err(Error::ClockRollback);
                 }
-                if self.wall().is_some_and(|now| *t < now.lower) {
+                if clock.is_some_and(|now| *t < now.lower) {
                     return Err(Error::ClockRollback);
                 }
             }
@@ -1025,7 +1149,7 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 if data.len() > self.factory.info.max_chunk_size as usize
                     || offset
                         .checked_add(data.len() as u64)
-                        .map_or(true, |end| end > m.size)
+                        .is_none_or(|end| end > m.size)
                     || *offset > self.state.firmware.received
                 {
                     return Err(Error::FirmwareConflict);
@@ -1048,7 +1172,7 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                         .firmware
                         .manifest
                         .as_ref()
-                        .map_or(true, |m| m.size != self.state.firmware.received)
+                        .is_none_or(|m| m.size != self.state.firmware.received)
                 {
                     return Err(Error::FirmwareIncomplete);
                 }
@@ -1137,23 +1261,33 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 } else {
                     ActionTarget::Lock
                 };
-                let deadline = now
-                    .checked_add(self.state.config.action_timeout_ms as u64)
-                    .ok_or(Error::InvalidState)?;
+                let Some(deadline) = self.prepare_actuation(target)? else {
+                    return self
+                        .finish(
+                            status,
+                            OperationPhase::Completed,
+                            CompletionEvidence::Sensor,
+                            0,
+                        )
+                        .map(Some);
+                };
                 // Invalidate an old reading before a movement starts.
                 if self.factory.info.bolt_sensor {
                     self.sample.bolt = Reading::Unknown;
                 }
                 self.active = Some(Active {
+                    id: self.next_actuation_id(),
                     credential_id: status.credential_id,
                     sequence: status.sequence,
                     target,
                     deadline,
                     automatic: false,
                 });
+                self.last_idle_bolt = None;
                 if self
                     .platform
                     .start_action(
+                        self.active.as_ref().ok_or(Error::InvalidState)?.id,
                         target,
                         self.state.config.release_ms,
                         self.state.config.hold_open,
@@ -1175,11 +1309,17 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                     .map(Some);
             }
             Action::SetConfig(config) => {
+                let relock_changed = config.auto_relock != next.config.auto_relock
+                    || config.hold_open != next.config.hold_open;
                 next.config = config.clone();
-                next.pending_relock = false;
-                self.relock_deadline = None;
-                if self.sample.bolt == Reading::Known(BoltState::Unlocked) {
-                    self.schedule_relock(&mut next, now);
+                if relock_changed {
+                    let should_relock = next.pending_relock
+                        || self.sample.bolt == Reading::Known(BoltState::Unlocked);
+                    next.pending_relock = false;
+                    self.relock_deadline = None;
+                    if should_relock {
+                        self.schedule_relock(&mut next, now);
+                    }
                 }
                 self.audit(
                     &mut next,
@@ -1195,15 +1335,14 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 )
                 .map_err(|_| Error::UntrustedKey)?;
                 let p = read_policy(&key, bytes)?;
+                let epoch_changed = p.epoch > next.epoch;
                 if p.epoch > next.epoch {
                     next.epoch = p.epoch;
                     next.revoked.clear();
                     next.uses.clear();
                     next.bindings.clear();
                     next.watermarks.clear();
-                    next.operations.retain(|r| r.status == *status);
-                    next.watermarks
-                        .insert(status.credential_id, status.sequence);
+                    next.operations.clear();
                     next.generation = next
                         .generation
                         .checked_add(1)
@@ -1218,8 +1357,24 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                     Some(status.sequence),
                     0,
                 )?;
+                if epoch_changed {
+                    self.commit(next)?;
+                    self.confirmation = None;
+                    let mut result = status.clone();
+                    result.phase = OperationPhase::Completed;
+                    return Ok(Some(Reply::Operation(result)));
+                }
             }
             Action::SetClock(time) => {
+                let clock = self.observe_hardware(false)?;
+                next = self.state.clone();
+                // The acceptance audit may have observed a newer RTC value than
+                // preflight. Never rewind that durable authorization watermark.
+                if next.clock_floor.is_some_and(|floor| *time < floor)
+                    || clock.is_some_and(|now| *time < now.lower)
+                {
+                    return Err(Error::ClockRollback);
+                }
                 next.clock_floor = Some(*time);
                 next.clock_valid = false;
                 self.commit(next)?;
@@ -1337,7 +1492,6 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 next = self.state.clone();
             }
             Action::FirmwareAbort => {
-                self.boot()?.abort()?;
                 next.firmware = FirmwareStatus {
                     phase: FirmwarePhase::Empty,
                     received: 0,
@@ -1345,17 +1499,27 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                     security_version: next.firmware.security_version,
                 };
                 next.signed_manifest.clear();
+                // Once staging can be erased, recovery must never advertise
+                // its former bytes as resumable or verified.
+                self.audit(
+                    &mut next,
+                    AuditKind::Firmware,
+                    Some(status.credential_id),
+                    Some(status.sequence),
+                    0,
+                )?;
+                self.commit(next)?;
+                self.boot()?.abort()?;
+                return Ok(None);
             }
             Action::RotateDeviceKey(bytes) => {
+                let clock = self.observe_hardware(false)?.ok_or(Error::ClockUntrusted)?;
+                next = self.state.clone();
                 let owner = next.owner.as_ref().ok_or(Error::NotProvisioned)?;
                 let issuer =
                     VerifyingKey::from_bytes(&owner.issuer).map_err(|_| Error::UntrustedKey)?;
-                let update = openlock_crypto::read_key_update(
-                    &issuer,
-                    &next.device_key,
-                    bytes,
-                    self.wall().ok_or(Error::ClockUntrusted)?,
-                )?;
+                let update =
+                    openlock_crypto::read_key_update(&issuer, &next.device_key, bytes, clock)?;
                 if !self
                     .platform
                     .has_device_private_key(&update.new_record.key.x25519_public_key)
@@ -1410,7 +1574,13 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         if self.state.firmware.phase != FirmwarePhase::Trial {
             return Ok(());
         }
-        let outcome = self.boot()?.outcome()?;
+        let candidate = self
+            .state
+            .firmware
+            .manifest
+            .clone()
+            .ok_or(Error::FirmwareInvalid)?;
+        let outcome = self.boot()?.outcome(&candidate)?;
         let mut next = self.state.clone();
         match outcome {
             BootOutcome::Pending => return Ok(()),
@@ -1440,6 +1610,11 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         self.commit(next)
     }
     pub fn hardware_changed(&mut self) -> Result<(), Error> {
+        self.observe_hardware(false).map(|_| ())
+    }
+    // Safety checks precede clock persistence. Authorization consumes the exact
+    // persisted observation, including when it rejects an expired credential.
+    fn observe_hardware(&mut self, allow_sensor_fault: bool) -> Result<Option<ClockSample>, Error> {
         let now = self.now()?;
         let sample = self.platform.sensors();
         if self.validate_sample(sample).is_err() {
@@ -1468,14 +1643,17 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 },
             };
             let mut next = self.state.clone();
-            if let Some(active) = self.active.take() {
+            if let Some(active) = self.active {
                 if self.platform.stop_action().is_err() {
                     self.poisoned = true;
                     return Err(Error::ActuatorFailed);
                 }
+                self.active = None;
                 next.automatic_inflight = false;
-                next.pending_relock = false;
-                self.relock_deadline = None;
+                if active.target == ActionTarget::Lock {
+                    next.pending_relock = false;
+                    self.relock_deadline = None;
+                }
                 if !active.automatic {
                     let record = next
                         .operations
@@ -1518,23 +1696,48 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             if next != self.state {
                 self.commit(next)?;
             }
-            return Err(Error::SensorConflict);
+            let clock = self.refresh_clock()?;
+            return if allow_sensor_fault {
+                Ok(clock)
+            } else {
+                Err(Error::SensorConflict)
+            };
         }
         let old = self.sample;
+        let was_idle = self.active.is_none();
+        let previous_idle_bolt = self.last_idle_bolt;
         self.sample = sample;
-        if sample == old {
-            return self.stop_unsafe_lock();
+        // Physical interlocks must stop the motor before any potentially slow
+        // clock or audit commit. Preserve whether this was a local observation.
+        self.stop_unsafe_action(now)?;
+        let clock = self.refresh_clock()?;
+        if was_idle {
+            if let Reading::Known(bolt) = sample.bolt {
+                self.last_idle_bolt = Some(bolt);
+            }
+        }
+        let confirmed_locked = sample.bolt == Reading::Known(BoltState::Locked)
+            && !self
+                .active
+                .is_some_and(|a| a.target == ActionTarget::Unlock);
+        if sample == old && !(confirmed_locked && self.state.pending_relock) {
+            return Ok(clock);
         }
         let mut next = self.state.clone();
-        self.audit(&mut next, AuditKind::Hardware, None, None, 0)?;
-        if let Some(event) = next.events.last_mut() {
-            event.hardware = Some(sample);
+        if sample != old {
+            self.audit(&mut next, AuditKind::Hardware, None, None, 0)?;
+            if let Some(event) = next.events.last_mut() {
+                event.hardware = Some(sample);
+            }
         }
-        if sample.bolt == Reading::Known(BoltState::Locked) {
+        if confirmed_locked {
             next.pending_relock = false;
             self.relock_deadline = None;
         }
         if old.door != sample.door {
+            if sample.door == Reading::Known(DoorState::Closed) && self.fault == Fault::DoorAjar {
+                self.fault = Fault::None;
+            }
             self.door_open_since = if sample.door == Reading::Known(DoorState::Open) {
                 Some(now)
             } else {
@@ -1550,41 +1753,59 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
                 }
             }
         }
-        if self.active.is_none()
-            && old.bolt != sample.bolt
+        if was_idle
+            && previous_idle_bolt == Some(BoltState::Locked)
             && sample.bolt == Reading::Known(BoltState::Unlocked)
         {
             self.schedule_relock(&mut next, now);
         }
         self.commit(next)?;
-        self.stop_unsafe_lock()
+        // A later audit read may have advanced the durable floor again. Never
+        // authorize using an earlier interval below that newly observed floor.
+        Ok(clock.filter(|sample| {
+            self.state
+                .clock_floor
+                .is_none_or(|floor| sample.lower >= floor)
+        }))
     }
-    fn stop_unsafe_lock(&mut self) -> Result<(), Error> {
-        if !self
-            .active
-            .as_ref()
-            .is_some_and(|a| a.target == ActionTarget::Lock)
-        {
+    fn stop_unsafe_action(&mut self, now: u64) -> Result<(), Error> {
+        let Some(active) = self.active else {
             return Ok(());
-        }
-        let error = match self.can_lock() {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
+        };
+        let interlock = if active.target == ActionTarget::Lock {
+            self.can_lock().err()
+        } else {
+            None
+        };
+        let Some(error) =
+            interlock.or_else(|| (now >= active.deadline).then_some(Error::ActionTimeout))
+        else {
+            return Ok(());
         };
         if self.platform.stop_action().is_err() {
             self.poisoned = true;
             return Err(Error::ActuatorFailed);
         }
         let active = self.active.take().ok_or(Error::InvalidState)?;
-        self.fault = if error == Error::DoorOpen {
+        self.last_idle_bolt = match self.sample.bolt {
+            Reading::Known(bolt) => Some(bolt),
+            _ => None,
+        };
+        self.fault = if error == Error::ActionTimeout {
+            Fault::Timeout
+        } else if error == Error::DoorOpen {
             Fault::DoorAjar
         } else {
             Fault::SensorConflict
         };
         let mut next = self.state.clone();
         next.automatic_inflight = false;
-        next.pending_relock = false;
-        self.relock_deadline = None;
+        if active.target == ActionTarget::Lock
+            || self.sample.bolt == Reading::Known(BoltState::Locked)
+        {
+            next.pending_relock = false;
+            self.relock_deadline = None;
+        }
         if !active.automatic {
             let record = next
                 .operations
@@ -1636,10 +1857,33 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             }
         }
     }
-    pub fn actuator_finished(&mut self, result: ActuatorResult) -> Result<(), Error> {
+    fn next_actuation_id(&self) -> ActuationId {
+        // The acceptance audit was just committed. Its cursor is never reused
+        // within a generation, including across reboot and result eviction.
+        ActuationId {
+            generation: self.state.generation,
+            audit_cursor: self.state.next_cursor - 1,
+        }
+    }
+    pub fn actuator_finished(
+        &mut self,
+        id: ActuationId,
+        result: ActuatorResult,
+    ) -> Result<(), Error> {
         let now = self.now()?;
+        if self.active.is_none_or(|active| active.id != id) {
+            return Err(Error::InvalidState);
+        }
         self.hardware_changed()?;
-        let active = self.active.take().ok_or(Error::InvalidState)?;
+        let Some(active) = self.active.take() else {
+            // The fresh safety sample may have already stopped and completed
+            // this action. Do not consume it again or overwrite that result.
+            return Ok(());
+        };
+        self.last_idle_bolt = match self.sample.bolt {
+            Reading::Known(bolt) => Some(bolt),
+            _ => None,
+        };
         let expected = if active.target == ActionTarget::Unlock {
             BoltState::Unlocked
         } else {
@@ -1696,7 +1940,9 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         if phase == OperationPhase::Completed && active.target == ActionTarget::Unlock {
             self.schedule_relock(&mut next, now);
         }
-        if active.target == ActionTarget::Lock {
+        if active.target == ActionTarget::Lock
+            || self.sample.bolt == Reading::Known(BoltState::Locked)
+        {
             next.automatic_inflight = false;
             next.pending_relock = false;
             self.relock_deadline = None;
@@ -1726,43 +1972,6 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
         let now = self.now()?;
         self.hardware_changed()?;
         self.reconcile_boot()?;
-        if self.active.as_ref().is_some_and(|a| now >= a.deadline) {
-            let operation = self
-                .active
-                .as_ref()
-                .filter(|a| !a.automatic)
-                .map(|a| (a.credential_id, a.sequence));
-            if self.platform.stop_action().is_err() {
-                self.poisoned = true;
-                return Err(Error::ActuatorFailed);
-            }
-            self.actuator_finished(ActuatorResult::Failed)?;
-            self.fault = Fault::Timeout;
-            // Distinct timeout result; never retry the action.
-            if let Some(record) = self
-                .state
-                .operations
-                .iter()
-                .find(|r| Some((r.status.credential_id, r.status.sequence)) == operation)
-                .cloned()
-            {
-                self.finish(
-                    &record.status,
-                    OperationPhase::Failed,
-                    CompletionEvidence::None,
-                    Error::ActionTimeout.code(),
-                )?;
-            } else if operation.is_none() {
-                let mut next = self.state.clone();
-                self.audit_automatic(
-                    &mut next,
-                    OperationPhase::Failed,
-                    CompletionEvidence::None,
-                    Error::ActionTimeout.code(),
-                )?;
-                self.commit(next)?;
-            }
-        }
         if self.state.config.door_ajar_ms > 0
             && self
                 .door_open_since
@@ -1798,17 +2007,51 @@ impl<S: DeviceStorage, P: DevicePlatform> DeviceController<S, P> {
             )?;
             self.commit(next)?;
             self.relock_deadline = None;
+            let deadline = match self.prepare_actuation(ActionTarget::Lock) {
+                Ok(Some(deadline)) => deadline,
+                Ok(None) => {
+                    let mut next = self.state.clone();
+                    next.automatic_inflight = false;
+                    self.audit_automatic(
+                        &mut next,
+                        OperationPhase::Completed,
+                        CompletionEvidence::Sensor,
+                        0,
+                    )?;
+                    self.commit(next)?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    if self.poisoned {
+                        return Err(error);
+                    }
+                    let mut next = self.state.clone();
+                    next.automatic_inflight = false;
+                    self.audit_automatic(
+                        &mut next,
+                        OperationPhase::Failed,
+                        CompletionEvidence::None,
+                        error.code(),
+                    )?;
+                    self.commit(next)?;
+                    return Err(error);
+                }
+            };
             self.active = Some(Active {
+                id: self.next_actuation_id(),
                 credential_id: CredentialId([0; 16]),
                 sequence: 0,
                 target: ActionTarget::Lock,
-                deadline: now.saturating_add(self.state.config.action_timeout_ms as u64),
+                deadline,
                 automatic: true,
             });
-            if let Err(e) =
-                self.platform
-                    .start_action(ActionTarget::Lock, self.state.config.release_ms, false)
-            {
+            self.last_idle_bolt = None;
+            if let Err(e) = self.platform.start_action(
+                self.active.as_ref().ok_or(Error::InvalidState)?.id,
+                ActionTarget::Lock,
+                self.state.config.release_ms,
+                false,
+            ) {
                 self.fault = Fault::Driver;
                 return Err(e);
             }

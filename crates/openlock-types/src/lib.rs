@@ -11,6 +11,8 @@ pub const PROTOCOL_VERSION: u64 = 4;
 pub const CREDENTIAL_VERSION: u64 = 2;
 pub const MAX_OBJECT_SIZE: usize = 4096;
 pub const MAX_MESSAGE_SIZE: usize = 4096;
+/// Local session events add an authenticated peer key to the wire body.
+pub const MAX_EVENT_SIZE: usize = MAX_MESSAGE_SIZE + 64;
 pub const RIGHTS_UNLOCK: u32 = 1;
 pub const RIGHTS_STATUS: u32 = 2;
 pub const RIGHTS_LOCK: u32 = 4;

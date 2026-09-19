@@ -39,7 +39,8 @@ requires a new handshake, but never resets credential operation sequences.
 Use definite arrays, byte strings, UTF-8 strings, nonnegative minimally encoded
 integers and `null` exactly as specified below. Application booleans are integers
 0 and 1. Unknown opcodes, enum values, capabilities, wrong field counts,
-indefinite/nonminimal encodings and trailing bytes are rejected. Strings in
+indefinite/nonminimal encodings and trailing bytes are rejected. CBOR decoding
+is limited to 16 nested containers before constructing recursive values. Strings in
 device/firmware records are at most 64 UTF-8 bytes. Signed COSE structures retain
 their specified protected and empty unprotected maps.
 
@@ -331,7 +332,8 @@ Finish requires the full size and verifies the actual staged image hash. Activat
 requires Verified, no active physical action, and acceptable platform power/boot
 conditions. Durably record Trial before scheduling activation. The bootloader
 independently verifies the signed target/hash and stages a recoverable trial boot.
-It reports Pending, Confirmed or RolledBack. Only a confirmed boot advances the
+It reports Pending, Confirmed or RolledBack for the exact candidate manifest;
+an old image’s result cannot confirm a new candidate. Only a confirmed boot advances the
 security version. Rollback marks Failed and retains the old security floor.
 Network clients cannot report boot success. Abort is not permitted during Trial.
 Normal unlock authorization remains active during download; trial activation

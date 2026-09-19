@@ -2,9 +2,9 @@ import Foundation
 import OpenLockFFI
 
 func check(_ code:Int32) throws { if code != 0 { throw OpenLockError.code(code) } }
-func output(_ call:(UnsafeMutablePointer<UInt8>,Int,UnsafeMutablePointer<Int>)->Int32) throws -> Data {
-    var bytes = [UInt8](repeating:0,count:4096); var length = 0
-    try check(call(&bytes,4096,&length)); return Data(bytes[..<length])
+func output(capacity:Int = Int(OPENLOCK_MAX_MESSAGE_SIZE),_ call:(UnsafeMutablePointer<UInt8>,Int,UnsafeMutablePointer<Int>)->Int32) throws -> Data {
+    var bytes = [UInt8](repeating:0,count:capacity); var length = 0
+    try check(call(&bytes,capacity,&length)); return Data(bytes[..<length])
 }
 public struct LockAction {
     let wire:Wire
@@ -44,7 +44,7 @@ public struct LockResponse {
 public enum SessionEvent {
     case handshake(peer:Data), request(id:UInt64,peer:Data,credential:Data,sequence:UInt64?,action:LockAction), response(id:UInt64,value:LockResponse)
     init(_ data:Data) throws {
-        let f = try Wire.decode(data).fields(4)
+        let f = try Wire.decode(data,limit:Int(OPENLOCK_MAX_EVENT_SIZE)).fields(4)
         switch try f[0].number {
         case 1:self = .handshake(peer:try f[2].data)
         case 2:let c = try f[3].fields(3);self = .request(id:try f[1].number,peer:try f[2].data,credential:try c[0].data,sequence:try c[1].optionalNumber,action:LockAction(wire:c[2]))
@@ -76,7 +76,7 @@ public final class OpenLockSession {
     public func receive(_ packet:Data) throws -> (event:SessionEvent?,reply:Data) {
         guard let handle else {throw OpenLockError.code(17)}
         try check(packet.withUnsafeBytes {openlock_session_receive(handle,$0.bindMemory(to:UInt8.self).baseAddress,packet.count)})
-        let event = try output {openlock_session_take_event(handle,$0,$1,$2)}
+        let event = try output(capacity:Int(OPENLOCK_MAX_EVENT_SIZE)) {openlock_session_take_event(handle,$0,$1,$2)}
         let reply = try output {openlock_session_take_output(handle,$0,$1,$2)}
         return (event.isEmpty ? nil : try SessionEvent(event),reply)
     }

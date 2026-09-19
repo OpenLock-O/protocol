@@ -18,6 +18,8 @@ in
     cargo
     rustfmt
     clippy
+    rustup
+    espup
     kotlin
     gradle
     jdk17
@@ -47,6 +49,7 @@ in
   env.CARGO_NET_OFFLINE = "true";
 
   scripts.check.exec = ''
+    set -eu
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
   '';
@@ -81,6 +84,12 @@ in
         --no-default-features \
         --target "$target"
     done
+  '';
+
+  # ESP-IDF needs a locally installed esp/nightly toolchain and build-std.
+  # These targets cannot be installed through languages.rust.targets.
+  scripts.esp32-check.exec = ''
+    exec bash scripts/check-esp32.sh "$@"
   '';
 
   enterShell = ''
