@@ -1,0 +1,4 @@
+# Bare-metal firmware supplies __getrandom_v03_custom using its secure RNG.
+# Keep this target-scoped: host tools and tests use the OS entropy backend.
+[target.'cfg(all(target_os = "none", any(target_arch = "arm", target_arch = "riscv32", target_arch = "riscv64")))']
+rustflags = ["--cfg", "getrandom_backend=\"custom\""]

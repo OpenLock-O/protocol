@@ -51,8 +51,22 @@ clock maintenance and factory reset. Swift/Kotlin additionally exercise device-k
 rotation and reconnection using the new key. Test keys are deterministic and must
 never be used in a device.
 
-The runtime crates support `no_std + alloc`; the embedded compile target is
-`thumbv7em-none-eabihf`. Issuer, FFI and the executable simulator are host tools.
+The runtime crates support `no_std + alloc`. Devenv installs and CI builds these
+bare-metal targets, including optimized machine-code generation:
+
+| Architecture | Rust target |
+| --- | --- |
+| ARM Cortex-M4/M7 with hard-float ABI | `thumbv7em-none-eabihf` |
+| RISC-V RV32IMC, without the A extension | `riscv32imc-unknown-none-elf` |
+| RISC-V RV32IMAC | `riscv32imac-unknown-none-elf` |
+| RISC-V RV64IMAC | `riscv64imac-unknown-none-elf` |
+
+`devenv shell -- embedded-check` builds just these runtime libraries;
+`no-std-check` also runs the host tests without default features. The target-scoped
+Cargo configuration selects the custom entropy backend on bare-metal ARM/RISC-V.
+Firmware must provide a secure RNG callback, allocator, startup/linker configuration
+and board I/O; see the [integration guide](docs/architecture.md#bare-metal-targets-and-rng).
+Issuer, FFI and the executable simulator are host tools.
 The Devenv environment includes Rust, Swift, Kotlin, Gradle, JDK 17, CMake and JNI
 headers. `JDK17_HOME` explicitly selects the declared Java toolchain for Gradle.
 The Swift integration runner is an executable, so it does not require XCTest.

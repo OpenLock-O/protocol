@@ -45,7 +45,7 @@ jobs:
       - name: Build workspace
         run: devenv shell -- build
 
-      - name: Check no_std embedded target
+      - name: Test no_std and build ARM / RISC-V runtime libraries
         run: devenv shell -- no-std-check
 
   bindings:

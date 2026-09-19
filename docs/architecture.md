@@ -140,12 +140,40 @@ and resolve it through the same interface, including across resets. The network
 cannot assert boot success. The protocol commits a new security floor only after
 Confirmed. Do not advertise firmware commands with a nonrecoverable backend.
 
-### Bare-metal RNG
+### Bare-metal targets and RNG
 
-Noise uses `getrandom` 0.3. Configure the firmware target:
+The runtime libraries are built in release mode for `thumbv7em-none-eabihf`,
+`riscv32imc-unknown-none-elf`, `riscv32imac-unknown-none-elf` and
+`riscv64imac-unknown-none-elf`. The RV32IMC build checks support without the atomic
+A extension; RV64IMAC also checks a 64-bit pointer ABI. Use the target matching
+the chip's ISA and firmware ABI. These are bare-metal targets; an OS-based board
+needs its corresponding OS target and integration.
+
+Devenv's `embeddedTargets` list controls both installed targets and the
+`embedded-check` build. Run all four builds with `devenv shell -- embedded-check`,
+or build an individual runtime crate and its dependencies:
+
+```sh
+devenv shell -- cargo build --locked --release --no-default-features \
+  --target riscv32imc-unknown-none-elf -p openlock-core
+```
+
+The protocol/runtime crates share the same implementation on ARM and RISC-V.
+Firmware provides the allocator, panic handler, chip startup, linker script and platform
+interfaces. Serialize controller access across interrupts and, where applicable,
+harts; `no_std` does not make the controller concurrently callable. A firmware
+runtime such as `riscv-rt` can supply RISC-V startup and linking support, with the
+board's memory map. See the [Rust RISC-V target guide](https://doc.rust-lang.org/rustc/platform-support/riscv32-unknown-none-elf.html)
+and [Rust platform support](https://doc.rust-lang.org/rustc/platform-support.html).
+
+Noise uses `getrandom` 0.3. This repository's `.cargo/config.toml` selects its
+custom backend only for bare-metal ARM/RISC-V, preserving OS entropy for host
+tools and tests. Cargo does not inherit a dependency's workspace configuration;
+when consuming OpenLock from another firmware project, add the matching entry
+to that project's `.cargo/config.toml` (change the target for your chip):
 
 ```toml
-[target.thumbv7em-none-eabihf]
+[target.riscv32imc-unknown-none-elf]
 rustflags = ['--cfg', 'getrandom_backend="custom"']
 ```
 
@@ -233,6 +261,7 @@ Before deployment, additionally validate on the chosen board:
 - Firmware staging under flash-write interruption, independent boot verification, bad trial recovery and security-floor persistence.
 - Real BLE/NFC MTUs, disconnection timing, key storage, image capacity and power/latency budgets.
 
-The `thumbv7em-none-eabihf` job compiles libraries with `no_std + alloc`; it does
-not link, flash or run a board image. Successful simulator tests do not replace
-these platform acceptance checks.
+The ARM/RISC-V build checks generate optimized runtime library artifacts with
+`no_std + alloc`; they do not link a complete firmware image, execute RISC-V
+instructions in an emulator, flash or run a board. Host simulator tests validate
+protocol behavior, and do not replace these platform acceptance checks.

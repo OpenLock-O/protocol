@@ -1,5 +1,13 @@
 { pkgs, ... }:
 
+let
+  embeddedTargets = [
+    "thumbv7em-none-eabihf"
+    "riscv32imc-unknown-none-elf"
+    "riscv32imac-unknown-none-elf"
+    "riscv64imac-unknown-none-elf"
+  ];
+in
 {
   scripts.nixd.exec = ''devenv lsp'';
 
@@ -32,7 +40,7 @@
   languages.rust.enable = true;
   languages.rust.channel = "stable";
   languages.rust.components = [ "rustc" "cargo" "rustfmt" "clippy" ];
-  languages.rust.targets = [ "thumbv7em-none-eabihf" ];
+  languages.rust.targets = embeddedTargets;
 
   env.JDK17_HOME = "${pkgs.jdk17}";
   env.OPENLOCK_OFFLINE = "1";
@@ -56,16 +64,23 @@
     cargo test --locked --workspace --no-default-features \
       --exclude openlock-issuer \
       --exclude openlock-ffi
-    RUSTFLAGS='--cfg getrandom_backend="custom"' cargo check --locked --lib \
-      -p openlock-types \
-      -p openlock-crypto \
-      -p openlock-protocol \
-      -p openlock-core \
-      -p openlock-transport \
-      -p openlock-transport-ble \
-      -p openlock-transport-nfc \
-      --no-default-features \
-      --target thumbv7em-none-eabihf
+    embedded-check
+  '';
+
+  scripts.embedded-check.exec = ''
+    set -eu
+    for target in ${pkgs.lib.escapeShellArgs embeddedTargets}; do
+      cargo build --locked --release --lib \
+        -p openlock-types \
+        -p openlock-crypto \
+        -p openlock-protocol \
+        -p openlock-core \
+        -p openlock-transport \
+        -p openlock-transport-ble \
+        -p openlock-transport-nfc \
+        --no-default-features \
+        --target "$target"
+    done
   '';
 
   enterShell = ''
