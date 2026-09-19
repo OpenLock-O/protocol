@@ -170,7 +170,8 @@ impl<S: TrustStorage> TrustStore<S> {
             .ok_or(Error::UntrustedKey)?;
         if old.key.key_id != update.old_key_id
             || update.new_record.key.key_version <= old.key.key_version
-            || update.not_before < now.lower
+            || now.lower < update.not_before
+            || now.upper >= update.retire_after
             || update.not_before >= update.retire_after
         {
             return Err(Error::StaleKey);
@@ -197,6 +198,116 @@ impl<S: TrustStorage> TrustStore<S> {
     }
     pub fn snapshot(&self) -> &TrustSnapshot {
         &self.snapshot
+    }
+}
+
+/// Full transport object: the signed update and the independently signed new record.
+pub fn encode_key_update(update: &KeyUpdate) -> Result<Vec<u8>, Error> {
+    encode(&array(vec![
+        bytes(&update.signature),
+        bytes(&update.new_record.signature),
+    ]))
+}
+/// Validate a ready-to-activate device rotation against the current device key.
+pub fn read_key_update(
+    issuer: &VerifyingKey,
+    old: &DeviceKey,
+    input: &[u8],
+    now: openlock_types::ClockSample,
+) -> Result<KeyUpdate, Error> {
+    now.validate()?;
+    let outer = decode(input)?;
+    let parts = fields(&outer, 2)?;
+    let signature = data(&parts[0])?.to_vec();
+    // Try only the two explicitly configured trust anchors, never a packet-supplied key.
+    let rotation =
+        VerifyingKey::from_bytes(&old.rotation_public_key).map_err(|_| Error::UntrustedKey)?;
+    let (v, root_signed) = match verify_object(issuer, UPDATE, &signature) {
+        Ok(v) => (v, true),
+        Err(_) => (verify_object(&rotation, UPDATE, &signature)?, false),
+    };
+    let f = fields(&v, 6)?;
+    if number(&f[0])? != 2 {
+        return Err(Error::UnsupportedVersion);
+    }
+    let k = fields(&f[2], 8)?;
+    if number(&k[0])? != 2 {
+        return Err(Error::UnsupportedVersion);
+    }
+    let record = DeviceKeyRecord {
+        key: DeviceKey {
+            device_id: LockId(fixed(&k[1])?),
+            key_id: u32_value(&k[2])?,
+            key_version: u32_value(&k[3])?,
+            x25519_public_key: fixed(&k[4])?,
+            rotation_public_key: fixed(&k[5])?,
+            capabilities: number(&k[6])?,
+        },
+        issuer_key_id: u32_value(&k[7])?,
+        signature: data(&parts[1])?.to_vec(),
+    };
+    let update = KeyUpdate {
+        old_key_id: u32_value(&f[1])?,
+        new_record: record,
+        not_before: number(&f[3])?,
+        retire_after: number(&f[4])?,
+        issuer_key_id: optional_u32(&f[5])?,
+        signature,
+    };
+    if root_signed != update.issuer_key_id.is_some() || key_update_value(&update) != v {
+        return Err(Error::InvalidPayload);
+    }
+    validate_key_update(&update)?;
+    verify_device_key(issuer, &update.new_record)?;
+    if update.old_key_id != old.key_id
+        || update.new_record.key.device_id != old.device_id
+        || update.new_record.key.key_version <= old.key_version
+        || now.lower < update.not_before
+        || now.upper >= update.retire_after
+    {
+        return Err(Error::StaleKey);
+    }
+    Ok(update)
+}
+
+/// Parse the signed device-key payload, whose version remains 2.
+pub fn parse_device_key_value(value: &Value) -> Result<(DeviceKey, u32), Error> {
+    let f = fields(value, 8)?;
+    if number(&f[0])? != 2 {
+        return Err(Error::UnsupportedVersion);
+    }
+    let key = DeviceKey {
+        device_id: LockId(fixed(&f[1])?),
+        key_id: u32_value(&f[2])?,
+        key_version: u32_value(&f[3])?,
+        x25519_public_key: fixed(&f[4])?,
+        rotation_public_key: fixed(&f[5])?,
+        capabilities: number(&f[6])?,
+    };
+    validate_device_key(&key)?;
+    Ok((key, u32_value(&f[7])?))
+}
+/// Sign the independently versioned device and key-update payloads for SDKs.
+pub fn sign_trust_payload(key: &SigningKey, kind: u32, value: &Value) -> Result<Vec<u8>, Error> {
+    match kind {
+        3 => {
+            let (device, issuer_id) = parse_device_key_value(value)?;
+            Ok(sign_device_key(key, &device, issuer_id)?.signature)
+        }
+        4 => {
+            let f = fields(value, 6)?;
+            if number(&f[0])? != 2 {
+                return Err(Error::UnsupportedVersion);
+            }
+            u32_value(&f[1])?;
+            parse_device_key_value(&f[2])?;
+            optional_u32(&f[5])?;
+            if number(&f[3])? >= number(&f[4])? {
+                return Err(Error::InvalidPayload);
+            }
+            sign_object(key, UPDATE, value)
+        }
+        _ => Err(Error::InvalidPayload),
     }
 }
 

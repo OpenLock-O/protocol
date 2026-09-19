@@ -1,4 +1,4 @@
-//! The session encoding permits only definite, minimally encoded arrays, bytes and integers.
+//! The v2 profile permits only definite, minimally encoded arrays, bytes and integers.
 use alloc::vec::Vec;
 pub use ciborium::value::Value;
 use ciborium::{de::from_reader, ser::into_writer};

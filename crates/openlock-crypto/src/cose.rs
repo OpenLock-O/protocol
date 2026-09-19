@@ -43,7 +43,7 @@ pub fn verify_object(key: &VerifyingKey, kind: &[u8], cose: &[u8]) -> Result<Val
 }
 pub fn grant_value(g: &Grant) -> Value {
     array(vec![
-        uint(PROTOCOL_VERSION),
+        uint(CREDENTIAL_VERSION),
         Value::Text("grant".into()),
         bytes(&g.credential_id.0),
         bytes(&g.lock_id.0),
@@ -56,9 +56,9 @@ pub fn grant_value(g: &Grant) -> Value {
         g.max_uses.map_or(Value::Null, |n| uint(n as u64)),
     ])
 }
-fn parse_grant(v: &Value) -> Result<Grant, Error> {
+pub fn parse_grant(v: &Value) -> Result<Grant, Error> {
     let f = fields(v, 9)?;
-    if number(&f[0])? != PROTOCOL_VERSION || f[1] != Value::Text("grant".into()) {
+    if number(&f[0])? != CREDENTIAL_VERSION || f[1] != Value::Text("grant".into()) {
         return Err(Error::UnsupportedVersion);
     }
     let validity = if f[7] == Value::Null {
@@ -84,7 +84,7 @@ fn parse_grant(v: &Value) -> Result<Grant, Error> {
 }
 fn validate_grant(g: &Grant) -> Result<(), Error> {
     if g.rights == 0
-        || g.rights & !(RIGHTS_UNLOCK | RIGHTS_STATUS) != 0
+        || g.rights & !KNOWN_RIGHTS != 0
         || g.max_uses == Some(0)
         || g.validity.is_some_and(|v| v.not_before >= v.not_after)
     {
@@ -107,7 +107,7 @@ pub fn verify_grant(key: &VerifyingKey, grant: &Grant, cose: &[u8]) -> Result<()
 }
 pub fn policy_value(p: &PolicyUpdate) -> Value {
     array(vec![
-        uint(PROTOCOL_VERSION),
+        uint(CREDENTIAL_VERSION),
         Value::Text("policy".into()),
         bytes(&p.lock_id.0),
         uint(p.epoch),
@@ -121,7 +121,7 @@ pub fn sign_policy(key: &SigningKey, policy: &PolicyUpdate) -> Result<Vec<u8>, E
 pub fn read_policy(key: &VerifyingKey, cose: &[u8]) -> Result<PolicyUpdate, Error> {
     let v = verify_object(key, POLICY, cose)?;
     let f = fields(&v, 6)?;
-    if number(&f[0])? != PROTOCOL_VERSION || f[1] != Value::Text("policy".into()) {
+    if number(&f[0])? != CREDENTIAL_VERSION || f[1] != Value::Text("policy".into()) {
         return Err(Error::UnsupportedVersion);
     }
     let Value::Array(ids) = &f[5] else {

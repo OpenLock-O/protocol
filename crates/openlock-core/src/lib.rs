@@ -1,8 +1,10 @@
-//! Signed-grant authorization. Transport and cryptographic primitives live in
+//! v2 authorization domain. Transport and cryptographic primitives live in
 //! `openlock-protocol`, `openlock-transport-*`, and `openlock-crypto`.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
+pub mod device;
+pub use device::*;
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -14,9 +16,9 @@ use thiserror::Error;
 
 pub use openlock_crypto::{verify_grant, verify_policy};
 pub use openlock_types::{
-    AccessRequest, Authorization, ClockSample, Command, CredentialId, Decision, DeviceKey,
-    DeviceKeyRecord, Error, Grant, KeyUpdate, LockId, PolicyUpdate, Response, SubjectKey, Validity,
-    PROTOCOL_VERSION, RIGHTS_STATUS, RIGHTS_UNLOCK,
+    Authorization, ClockSample, Command, CredentialId, Decision, DeviceKey, DeviceKeyRecord, Error,
+    Grant, KeyUpdate, LockId, PolicyUpdate, Response, SubjectKey, Validity, PROTOCOL_VERSION,
+    RIGHTS_STATUS, RIGHTS_UNLOCK,
 };
 
 pub trait PersistentState {
@@ -118,6 +120,16 @@ impl<S: PersistentState> LockState<S> {
             if clock.lower < validity.not_before || clock.upper >= validity.not_after {
                 return Err(Error::Expired);
             }
+        }
+        if required_rights & RIGHTS_UNLOCK == 0 {
+            if requested_use.is_some() {
+                return Err(Error::InvalidConsumption);
+            }
+            return Ok(Decision::Authorized(if grant.validity.is_some() {
+                Authorization::Timed
+            } else {
+                Authorization::LongLived
+            }));
         }
         let used = self
             .snapshot

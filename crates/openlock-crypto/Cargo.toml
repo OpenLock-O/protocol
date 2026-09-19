@@ -16,3 +16,6 @@ sha2.workspace = true
 ciborium = { workspace = true, default-features = false }
 snow = { workspace = true, default-features = false }
 x25519-dalek.workspace = true
+
+subtle.workspace = true
+zeroize.workspace = true

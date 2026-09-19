@@ -1,4 +1,4 @@
-//! Transport-neutral encrypted-session envelope and state machine for OpenLock.
+//! Transport-neutral OpenLock v2 message envelope and session state machine.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -96,134 +96,39 @@ pub fn decode_packet(bytes: &[u8]) -> Result<Packet, Error> {
     Ok(packet)
 }
 
-fn request_value(command: &Command) -> openlock_crypto::cbor::Value {
-    match command {
-        Command::Unlock(r) => cbor::array(vec![
-            cbor::uint(0),
-            cbor::bytes(&r.credential),
-            r.requested_use
-                .map_or(cbor::Value::Null, |n| cbor::uint(n as u64)),
-        ]),
-        Command::Status(r) => cbor::array(vec![
-            cbor::uint(1),
-            cbor::bytes(&r.credential),
-            r.requested_use
-                .map_or(cbor::Value::Null, |n| cbor::uint(n as u64)),
-        ]),
-        Command::ApplyPolicy(s) => cbor::array(vec![cbor::uint(2), cbor::bytes(s)]),
-    }
+pub use openlock_crypto::wire::{decode_wire, encode_wire};
+use openlock_crypto::wire::{validate_response, Wire};
+fn request_value(command: &Command) -> cbor::Value {
+    command.value()
+}
+fn parse_request(value: &cbor::Value) -> Result<Command, Error> {
+    Command::parse(value)
+}
+fn validate_command(command: &Command) -> Result<(), Error> {
+    command.validate()?;
+    Command::parse(&command.value()).map(|_| ())
+}
+fn response_value(response: &Response) -> cbor::Value {
+    response.value()
+}
+fn parse_response(value: &cbor::Value) -> Result<Response, Error> {
+    Response::parse(value)
+}
+fn response_capability(response: &Response, _: u64) -> Option<u64> {
+    Some(1 << response.opcode)
 }
 fn authenticated_value(
     kind: u8,
     request_id: u32,
     capabilities: u64,
-    body: openlock_crypto::cbor::Value,
-) -> openlock_crypto::cbor::Value {
+    body: cbor::Value,
+) -> cbor::Value {
     cbor::array(vec![
         cbor::uint(kind as u64),
         cbor::uint(request_id as u64),
         cbor::uint(capabilities),
         body,
     ])
-}
-fn validate_command(command: &Command) -> Result<(), Error> {
-    match command {
-        Command::Unlock(r) | Command::Status(r) => {
-            if r.credential.is_empty() || r.credential.len() > MAX_OBJECT_SIZE {
-                return Err(Error::InvalidPayload);
-            }
-        }
-        Command::ApplyPolicy(policy) => {
-            if policy.is_empty() || policy.len() > MAX_OBJECT_SIZE {
-                return Err(Error::InvalidPayload);
-            }
-        }
-    }
-    Ok(())
-}
-fn parse_request(v: &openlock_crypto::cbor::Value) -> Result<Command, Error> {
-    let cbor::Value::Array(values) = v else {
-        return Err(Error::InvalidPayload);
-    };
-    if values.is_empty() {
-        return Err(Error::InvalidPayload);
-    }
-    let kind = cbor::u32_value(&values[0])?;
-    match (kind, values.len()) {
-        (0, 3) | (1, 3) => {
-            let credential = cbor::data(&values[1])?;
-            if credential.is_empty() || credential.len() > MAX_OBJECT_SIZE {
-                return Err(Error::InvalidPayload);
-            }
-            let request = AccessRequest {
-                credential: credential.to_vec(),
-                requested_use: cbor::optional_u32(&values[2])?,
-            };
-            if kind == 0 {
-                Ok(Command::Unlock(request))
-            } else {
-                Ok(Command::Status(request))
-            }
-        }
-        (2, 2) => {
-            let policy = cbor::data(&values[1])?;
-            if policy.is_empty() || policy.len() > MAX_OBJECT_SIZE {
-                return Err(Error::InvalidPayload);
-            }
-            Ok(Command::ApplyPolicy(policy.to_vec()))
-        }
-        _ => Err(Error::InvalidPayload),
-    }
-}
-fn response_value(r: &Response) -> openlock_crypto::cbor::Value {
-    match r {
-        Response::Unlocked => cbor::array(vec![cbor::uint(0)]),
-        Response::Status {
-            epoch,
-            policy_version,
-        } => cbor::array(vec![
-            cbor::uint(1),
-            cbor::uint(*epoch),
-            cbor::uint(*policy_version),
-        ]),
-        Response::PolicyApplied => cbor::array(vec![cbor::uint(2)]),
-        Response::AlreadyConsumed { next_use } => {
-            cbor::array(vec![cbor::uint(3), cbor::uint(*next_use as u64)])
-        }
-        Response::Rejected { code } => cbor::array(vec![cbor::uint(4), cbor::uint(*code as u64)]),
-    }
-}
-fn parse_response(v: &openlock_crypto::cbor::Value) -> Result<Response, Error> {
-    let cbor::Value::Array(f) = v else {
-        return Err(Error::InvalidPayload);
-    };
-    match (
-        cbor::u32_value(f.first().ok_or(Error::InvalidPayload)?)?,
-        f.len(),
-    ) {
-        (0, 1) => Ok(Response::Unlocked),
-        (1, 3) => Ok(Response::Status {
-            epoch: cbor::number(&f[1])?,
-            policy_version: cbor::number(&f[2])?,
-        }),
-        (2, 1) => Ok(Response::PolicyApplied),
-        (3, 2) => Ok(Response::AlreadyConsumed {
-            next_use: cbor::u32_value(&f[1])?,
-        }),
-        (4, 2) => Ok(Response::Rejected {
-            code: cbor::u32_value(&f[1])?,
-        }),
-        _ => Err(Error::InvalidPayload),
-    }
-}
-fn response_capability(response: &Response, expected: u64) -> Option<u64> {
-    match response {
-        Response::Unlocked => Some(CAP_UNLOCK),
-        Response::AlreadyConsumed { .. } => Some(expected),
-        Response::Status { .. } => Some(CAP_STATUS),
-        Response::PolicyApplied => Some(CAP_POLICY),
-        Response::Rejected { .. } => None,
-    }
 }
 
 pub struct Session {
@@ -268,6 +173,19 @@ impl Session {
             channel: NoiseChannel::responder(private)?,
         })
     }
+    /// Empty Noise IK first message is 96 bytes, before the CBOR envelope.
+    pub fn start_size(&self) -> Result<usize, Error> {
+        if self.role != Role::Initiator || self.started {
+            return Err(Error::InvalidState);
+        }
+        encode_packet(&Packet {
+            kind: KIND_HANDSHAKE,
+            request_id: 0,
+            capabilities: 0,
+            payload: vec![0; 96],
+        })
+        .map(|p| p.len())
+    }
     pub fn start(&mut self) -> Result<Vec<u8>, Error> {
         if self.role != Role::Initiator || self.started {
             return Err(Error::InvalidState);
@@ -281,6 +199,16 @@ impl Session {
         })
     }
     pub fn receive(&mut self, input: &[u8]) -> Result<(Vec<SessionEvent>, Option<Vec<u8>>), Error> {
+        let result = self.receive_inner(input);
+        if result.is_err() {
+            self.close();
+        }
+        result
+    }
+    fn receive_inner(
+        &mut self,
+        input: &[u8],
+    ) -> Result<(Vec<SessionEvent>, Option<Vec<u8>>), Error> {
         let packet = decode_packet(input)?;
         if packet.kind == KIND_HANDSHAKE {
             if self.role == Role::Initiator {
@@ -383,7 +311,7 @@ impl Session {
         Ok((events, reply))
     }
     pub fn send(&mut self, command: Command) -> Result<(u32, Vec<u8>), Error> {
-        validate_command(&command)?;
+        self.request_size(&command)?;
         if self.role != Role::Initiator
             || !self.channel.is_transport()
             || command.capability() & self.capabilities != command.capability()
@@ -443,6 +371,7 @@ impl Session {
         .map(|packet| packet.len())
     }
     pub fn respond(&mut self, request_id: u32, response: Response) -> Result<Vec<u8>, Error> {
+        self.response_size(request_id, &response)?;
         if self.role != Role::Responder
             || !self.channel.is_transport()
             || !self.pending_requests.contains_key(&request_id)
@@ -473,196 +402,35 @@ impl Session {
         self.pending_requests.remove(&request_id);
         Ok(packet)
     }
+    pub fn response_size(&self, request_id: u32, response: &Response) -> Result<usize, Error> {
+        validate_response(response)?;
+        if self.role != Role::Responder
+            || self.pending_requests.get(&request_id) != Some(&(1 << response.opcode))
+        {
+            return Err(Error::InvalidState);
+        }
+        let body = cbor::encode(&authenticated_value(
+            KIND_RESPONSE,
+            request_id,
+            self.capabilities,
+            response_value(response),
+        ))?;
+        if body.len() > MAX_MESSAGE_SIZE - 128 {
+            return Err(Error::ObjectTooLarge);
+        }
+        encode_packet(&Packet {
+            kind: KIND_RESPONSE,
+            request_id,
+            capabilities: self.capabilities,
+            payload: vec![0; body.len() + 16],
+        })
+        .map(|p| p.len())
+    }
+    pub fn close(&mut self) {
+        self.channel.close();
+        self.pending_requests.clear();
+    }
     pub fn peer_static(&self) -> Result<SubjectKey, Error> {
         self.channel.peer_static()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn v2_packet_matches_fixed_wire_bytes() {
-        let encoded = [
-            0x86, 0x02, 0x01, 0x01, 0x18, 0x18, 0x07, 0x43, 0xaa, 0xbb, 0xcc,
-        ];
-        let packet = Packet {
-            kind: KIND_REQUEST,
-            request_id: 24,
-            capabilities: CAP_UNLOCK | CAP_STATUS | CAP_POLICY,
-            payload: vec![0xaa, 0xbb, 0xcc],
-        };
-        assert_eq!(encode_packet(&packet).unwrap(), encoded);
-        assert_eq!(decode_packet(&encoded), Ok(packet));
-    }
-
-    #[test]
-    fn noise_session_round_trip_over_arbitrary_bytes() {
-        let mut phone = Session::initiator(
-            &[3; 32],
-            &openlock_crypto::static_public(&[4; 32]),
-            CAP_UNLOCK,
-        )
-        .unwrap();
-        let mut lock = Session::responder(&[4; 32], CAP_UNLOCK).unwrap();
-        let first = phone.start().unwrap();
-        let (events, second) = lock.receive(&first).unwrap();
-        assert!(matches!(
-            events.first(),
-            Some(SessionEvent::HandshakeComplete { .. })
-        ));
-        let second = second.unwrap();
-        let (events, _) = phone.receive(&second).unwrap();
-        assert!(matches!(
-            events.first(),
-            Some(SessionEvent::HandshakeComplete { .. })
-        ));
-        let (_, request) = phone
-            .send(Command::Unlock(AccessRequest {
-                credential: vec![1, 2, 3],
-                requested_use: Some(0),
-            }))
-            .unwrap();
-        let (events, _) = lock.receive(&request).unwrap();
-        assert!(matches!(
-            events.first(),
-            Some(SessionEvent::Request {
-                command: Command::Unlock(_),
-                ..
-            })
-        ));
-    }
-    #[test]
-    fn malformed_command_does_not_panic() {
-        assert_eq!(
-            parse_request(&cbor::array(vec![])),
-            Err(Error::InvalidPayload)
-        );
-    }
-
-    #[test]
-    fn roles_and_request_ids_are_enforced() {
-        let mut initiator = Session::initiator(
-            &[3; 32],
-            &openlock_crypto::static_public(&[4; 32]),
-            CAP_UNLOCK,
-        )
-        .unwrap();
-        let mut responder = Session::responder(&[4; 32], CAP_UNLOCK).unwrap();
-        let first = initiator.start().unwrap();
-        let (_, second) = responder.receive(&first).unwrap();
-        initiator.receive(&second.unwrap()).unwrap();
-        assert_eq!(
-            responder.send(Command::Unlock(AccessRequest {
-                credential: vec![1],
-                requested_use: None
-            })),
-            Err(Error::InvalidState)
-        );
-        let (id, request) = initiator
-            .send(Command::Unlock(AccessRequest {
-                credential: vec![1],
-                requested_use: None,
-            }))
-            .unwrap();
-        responder.receive(&request).unwrap();
-        assert_eq!(
-            responder.respond(id + 1, Response::Unlocked),
-            Err(Error::InvalidState)
-        );
-        let response = responder.respond(id, Response::Unlocked).unwrap();
-        initiator.receive(&response).unwrap();
-        assert_eq!(initiator.receive(&response), Err(Error::InvalidState));
-    }
-
-    #[test]
-    fn packet_invariants_are_rejected() {
-        assert_eq!(
-            encode_packet(&Packet {
-                kind: KIND_HANDSHAKE,
-                request_id: 1,
-                capabilities: 0,
-                payload: vec![1]
-            }),
-            Err(Error::InvalidPayload)
-        );
-        assert_eq!(
-            encode_packet(&Packet {
-                kind: KIND_REQUEST,
-                request_id: 1,
-                capabilities: 8,
-                payload: vec![1]
-            }),
-            Err(Error::InvalidPayload)
-        );
-        assert_eq!(
-            encode_packet(&Packet {
-                kind: KIND_RESPONSE,
-                request_id: 1,
-                capabilities: CAP_UNLOCK,
-                payload: vec![]
-            }),
-            Err(Error::InvalidPayload)
-        );
-    }
-
-    #[test]
-    fn encrypted_metadata_tampering_is_rejected() {
-        let mut initiator = Session::initiator(
-            &[3; 32],
-            &openlock_crypto::static_public(&[4; 32]),
-            CAP_UNLOCK,
-        )
-        .unwrap();
-        let mut responder = Session::responder(&[4; 32], CAP_UNLOCK).unwrap();
-        let first = initiator.start().unwrap();
-        let (_, second) = responder.receive(&first).unwrap();
-        initiator.receive(&second.unwrap()).unwrap();
-        let (request_id, request) = initiator
-            .send(Command::Unlock(AccessRequest {
-                credential: vec![1, 2, 3],
-                requested_use: None,
-            }))
-            .unwrap();
-        let packet = decode_packet(&request).unwrap();
-        let forged = encode_packet(&Packet {
-            request_id: request_id + 1,
-            ..packet
-        })
-        .unwrap();
-        assert_eq!(responder.receive(&forged), Err(Error::InvalidPayload));
-    }
-
-    #[test]
-    fn already_consumed_uses_pending_status_capability() {
-        let mut initiator = Session::initiator(
-            &[3; 32],
-            &openlock_crypto::static_public(&[4; 32]),
-            CAP_STATUS,
-        )
-        .unwrap();
-        let mut responder = Session::responder(&[4; 32], CAP_STATUS).unwrap();
-        let first = initiator.start().unwrap();
-        let (_, second) = responder.receive(&first).unwrap();
-        initiator.receive(&second.unwrap()).unwrap();
-        let (request_id, request) = initiator
-            .send(Command::Status(AccessRequest {
-                credential: vec![1, 2, 3],
-                requested_use: Some(0),
-            }))
-            .unwrap();
-        responder.receive(&request).unwrap();
-        let response = responder
-            .respond(request_id, Response::AlreadyConsumed { next_use: 1 })
-            .unwrap();
-        let (events, _) = initiator.receive(&response).unwrap();
-        assert!(matches!(
-            events.first(),
-            Some(SessionEvent::Response {
-                response: Response::AlreadyConsumed { next_use: 1 },
-                ..
-            })
-        ));
     }
 }

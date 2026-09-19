@@ -4,15 +4,27 @@
 extern crate alloc;
 
 pub mod cbor;
+pub mod commissioning;
 pub mod cose;
+pub mod firmware;
 pub mod noise;
 pub mod trust;
+pub mod wire;
 pub use cose::*;
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use noise::*;
 use openlock_types::CredentialId;
 use sha2::{Digest, Sha256};
 pub use trust::*;
+
+pub fn constant_time_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
+    use subtle::ConstantTimeEq;
+    left.ct_eq(right).into()
+}
+
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
 
 pub fn credential_id(bytes: &[u8]) -> CredentialId {
     let hash = Sha256::digest(bytes);

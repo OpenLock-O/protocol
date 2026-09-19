@@ -2,7 +2,7 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use openlock_types::{Error, SubjectKey, MAX_MESSAGE_SIZE};
 
 pub const NOISE_SUITE: &str = "Noise_IK_25519_ChaChaPoly_SHA256";
-const PROLOGUE: &[u8] = b"OpenLock/v2/profile1";
+const PROLOGUE: &[u8] = b"OpenLock/v4/profile1";
 
 pub fn static_public(private_key: &[u8; 32]) -> [u8; 32] {
     use x25519_dalek::{PublicKey, StaticSecret};

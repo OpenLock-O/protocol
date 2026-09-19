@@ -17,7 +17,7 @@ pub fn encode_bootstrap(record: &DeviceKeyRecord) -> Result<Vec<u8>, Error> {
     let key = &record.key;
     cbor::encode_limit(
         &cbor::array(vec![
-            cbor::uint(2),
+            cbor::uint(openlock_types::PROTOCOL_VERSION),
             cbor::bytes(&key.device_id.0),
             cbor::uint(key.key_id as u64),
             cbor::uint(key.key_version as u64),
@@ -33,7 +33,7 @@ pub fn encode_bootstrap(record: &DeviceKeyRecord) -> Result<Vec<u8>, Error> {
 pub fn decode_bootstrap(bytes: &[u8], issuer: &VerifyingKey) -> Result<DeviceKeyRecord, Error> {
     let value = cbor::decode_limit(bytes, MAX_NDEF_RECORD)?;
     let f = cbor::fields(&value, 9)?;
-    if cbor::number(&f[0])? != 2 {
+    if cbor::number(&f[0])? != openlock_types::PROTOCOL_VERSION {
         return Err(Error::UnsupportedVersion);
     }
     let key = openlock_types::DeviceKey {

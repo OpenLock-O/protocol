@@ -1,103 +1,80 @@
 #include <jni.h>
 #include <stdint.h>
+#include <string.h>
 #include "openlock.h"
 
-JNIEXPORT jlong JNICALL Java_org_openlock_OpenLockSession_newInitiator(
-    JNIEnv *env, jclass klass, jbyteArray private_key, jbyteArray lock_public,
-    jlong capabilities) {
-    (void)klass;
-    if (!private_key || !lock_public || (*env)->GetArrayLength(env, private_key) != 32 ||
-        (*env)->GetArrayLength(env, lock_public) != 32) return 0;
-    jbyte *private_bytes = (*env)->GetByteArrayElements(env, private_key, 0);
-    jbyte *public_bytes = (*env)->GetByteArrayElements(env, lock_public, 0);
-    openlock_session_t *session = NULL;
-    int32_t code = openlock_session_initiator((const uint8_t *)private_bytes,
-        (const uint8_t *)public_bytes, (uint64_t)capabilities, &session);
-    (*env)->ReleaseByteArrayElements(env, private_key, private_bytes, JNI_ABORT);
-    (*env)->ReleaseByteArrayElements(env, lock_public, public_bytes, JNI_ABORT);
-    return code == 0 ? (jlong)(intptr_t)session : 0;
-}
-
-JNIEXPORT void JNICALL Java_org_openlock_OpenLockSession_free(
-    JNIEnv *env, jclass klass, jlong handle) {
-    (void)env; (void)klass;
-    openlock_session_free((openlock_session_t *)(intptr_t)handle);
-}
-
-#include <jni.h>
-#include <stdint.h>
-#include "openlock.h"
-
-static void throw_code(JNIEnv *env, int32_t code) {
+static void fail(JNIEnv *env, int32_t code) {
     jclass type = (*env)->FindClass(env, "org/openlock/OpenLockException");
     if (!type) return;
-    jmethodID ctor = (*env)->GetMethodID(env, type, "<init>", "(I)V");
-    if (ctor) {
-        jobject exception = (*env)->NewObject(env, type, ctor, (jint)code);
-        if (exception) {
-            (*env)->Throw(env, (jthrowable)exception);
-            (*env)->DeleteLocalRef(env, exception);
-        }
-    }
-    (*env)->DeleteLocalRef(env, type);
+    jmethodID init = (*env)->GetMethodID(env,type,"<init>","(I)V");
+    if (!init) return;
+    jobject error = (*env)->NewObject(env,type,init,(jint)code);
+    if (error) (*env)->Throw(env,(jthrowable)error);
 }
-
-static jbyteArray return_bytes(JNIEnv *env, const uint8_t *bytes, size_t len, int32_t code) {
-    if (code != 0) { throw_code(env, code); return NULL; }
-    jbyteArray result = (*env)->NewByteArray(env, (jsize)len);
-    if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)len, (const jbyte *)bytes);
-    return result;
+static int read(JNIEnv *env,jbyteArray input,uint8_t *out,size_t capacity,jsize *length) {
+    if (!input) { fail(env,-1); return 0; }
+    *length=(*env)->GetArrayLength(env,input);
+    if ((size_t)*length>capacity) { fail(env,1); return 0; }
+    (*env)->GetByteArrayRegion(env,input,0,*length,(jbyte*)out);
+    return !(*env)->ExceptionCheck(env);
 }
-
-JNIEXPORT jbyteArray JNICALL Java_org_openlock_OpenLock_makeUnlockNative(
-    JNIEnv *env, jclass klass, jbyteArray secret, jlong credential_id, jlong unix_seconds) {
-    (void)klass;
-    if (!secret || (*env)->GetArrayLength(env, secret) != OPENLOCK_SECRET_SIZE ||
-        credential_id <= 0 || (uint64_t)credential_id > UINT32_MAX || unix_seconds < 0) {
-        throw_code(env, 3); return NULL;
-    }
-    uint8_t key[OPENLOCK_SECRET_SIZE] = {0};
-    (*env)->GetByteArrayRegion(env, secret, 0, OPENLOCK_SECRET_SIZE, (jbyte *)key);
-    if ((*env)->ExceptionCheck(env)) return NULL;
-    uint8_t bytes[OPENLOCK_REQUEST_SIZE];
-    size_t len = 0;
-    int32_t code = openlock_make_unlock(key, (uint32_t)credential_id, (uint64_t)unix_seconds,
-                                       bytes, sizeof(bytes), &len);
-    /* Erase the temporary native key copy, including on an ABI error. */
-    volatile uint8_t *wipe = key;
-    for (size_t i = 0; i < sizeof(key); ++i) wipe[i] = 0;
-    return return_bytes(env, bytes, len, code);
+static jbyteArray result(JNIEnv *env,int32_t code,const uint8_t *data,size_t length) {
+    if (code) {fail(env,code);return NULL;}
+    jbyteArray out=(*env)->NewByteArray(env,(jsize)length);
+    if (out && length) (*env)->SetByteArrayRegion(env,out,0,(jsize)length,(const jbyte*)data);
+    return out;
 }
-
-JNIEXPORT jbyteArray JNICALL Java_org_openlock_OpenLock_encodeUnlockNative(
-    JNIEnv *env, jclass klass, jlong credential_id, jlong time_step, jint otp) {
-    (void)klass;
-    if (credential_id <= 0 || (uint64_t)credential_id > UINT32_MAX || time_step < 0 || otp < 0) {
-        throw_code(env, 3); return NULL;
-    }
-    uint8_t bytes[OPENLOCK_REQUEST_SIZE];
-    size_t len = 0;
-    int32_t code = openlock_encode_unlock((uint32_t)credential_id, (uint64_t)time_step,
-                                         (uint32_t)otp, bytes, sizeof(bytes), &len);
-    return return_bytes(env, bytes, len, code);
+static openlock_session_t *session(JNIEnv *env,jlong handle) {
+    if (!handle) {fail(env,17);return NULL;}
+    return (openlock_session_t*)(intptr_t)handle;
 }
-
-JNIEXPORT jlongArray JNICALL Java_org_openlock_OpenLock_decodeResponseNative(
-    JNIEnv *env, jclass klass, jbyteArray input) {
-    (void)klass;
-    if (!input || (*env)->GetArrayLength(env, input) != OPENLOCK_RESPONSE_SIZE) {
-        throw_code(env, 3); return NULL;
-    }
-    uint8_t bytes[OPENLOCK_RESPONSE_SIZE];
-    (*env)->GetByteArrayRegion(env, input, 0, OPENLOCK_RESPONSE_SIZE, (jbyte *)bytes);
-    if ((*env)->ExceptionCheck(env)) return NULL;
-    openlock_response_t response;
-    int32_t code = openlock_decode_response(bytes, sizeof(bytes), &response);
-    if (code != 0) { throw_code(env, code); return NULL; }
-    if (response.time_step > INT64_MAX) { throw_code(env, 3); return NULL; }
-    const jlong fields[] = { (jlong)response.credential_id, (jlong)response.time_step,
-                            (jlong)response.error_code };
-    jlongArray result = (*env)->NewLongArray(env, 3);
-    if (result) (*env)->SetLongArrayRegion(env, result, 0, 3, fields);
-    return result;
+JNIEXPORT jlong JNICALL Java_org_openlock_Native_create(JNIEnv *env,jclass type,jbyteArray private_key,jbyteArray public_key,jlong capabilities) {
+    (void)type; uint8_t private_bytes[32],public_bytes[32]; jsize pn,qn;
+    if (!read(env,private_key,private_bytes,32,&pn)||!read(env,public_key,public_bytes,32,&qn)) return 0;
+    if (pn!=32||qn!=32){fail(env,-1);return 0;}
+    openlock_session_t *out=NULL;
+    int32_t code=openlock_session_initiator(private_bytes,public_bytes,(uint64_t)capabilities,&out);
+    volatile uint8_t *wipe=private_bytes;for(size_t i=0;i<32;i++)wipe[i]=0;
+    if(code){fail(env,code);return 0;}return (jlong)(intptr_t)out;
+}
+JNIEXPORT void JNICALL Java_org_openlock_Native_free(JNIEnv *env,jclass type,jlong handle){(void)env;(void)type;openlock_session_free((openlock_session_t*)(intptr_t)handle);}
+JNIEXPORT jbyteArray JNICALL Java_org_openlock_Native_start(JNIEnv *env,jclass type,jlong handle){
+    (void)type;openlock_session_t *s=session(env,handle);if(!s)return NULL;
+    uint8_t out[4096];size_t length=0;int32_t code=openlock_session_start(s,out,sizeof out,&length);return result(env,code,out,length);
+}
+JNIEXPORT jbyteArray JNICALL Java_org_openlock_Native_send(JNIEnv *env,jclass type,jlong handle,jbyteArray command){
+    (void)type;openlock_session_t *s=session(env,handle);if(!s)return NULL;
+    uint8_t input[4096],out[4100];jsize count;size_t length=0;uint32_t id=0;
+    if(!read(env,command,input,sizeof input,&count))return NULL;
+    int32_t code=openlock_session_send(s,input,(size_t)count,&id,out+4,4096,&length);
+    out[0]=(uint8_t)(id>>24);out[1]=(uint8_t)(id>>16);out[2]=(uint8_t)(id>>8);out[3]=(uint8_t)id;
+    return result(env,code,out,length+4);
+}
+JNIEXPORT jobjectArray JNICALL Java_org_openlock_Native_receive(JNIEnv *env,jclass type,jlong handle,jbyteArray packet){
+    (void)type;openlock_session_t *s=session(env,handle);if(!s)return NULL;
+    uint8_t input[4096],event[4096],reply[4096];jsize count;size_t event_len=0,reply_len=0;
+    if(!read(env,packet,input,sizeof input,&count))return NULL;
+    int32_t code=openlock_session_receive(s,input,(size_t)count);
+    if(!code)code=openlock_session_take_event(s,event,sizeof event,&event_len);
+    if(!code)code=openlock_session_take_output(s,reply,sizeof reply,&reply_len);
+    if(code){fail(env,code);return NULL;}
+    jclass bytes=(*env)->FindClass(env,"[B");if(!bytes)return NULL;
+    jobjectArray out=(*env)->NewObjectArray(env,2,bytes,NULL);if(!out)return NULL;
+    jbyteArray a=result(env,0,event,event_len),b=result(env,0,reply,reply_len);
+    if(a&&b){(*env)->SetObjectArrayElement(env,out,0,a);(*env)->SetObjectArrayElement(env,out,1,b);}return out;
+}
+JNIEXPORT jbyteArray JNICALL Java_org_openlock_Native_publicKey(JNIEnv *env,jclass type,jint kind,jbyteArray key){
+    (void)type;uint8_t private_bytes[32],out[32];jsize count;
+    if(!read(env,key,private_bytes,32,&count))return NULL;if(count!=32){fail(env,-1);return NULL;}
+    int32_t code=openlock_public_key((uint32_t)kind,private_bytes,out);
+    volatile uint8_t *wipe=private_bytes;for(size_t i=0;i<32;i++)wipe[i]=0;
+    return result(env,code,out,32);
+}
+JNIEXPORT jbyteArray JNICALL Java_org_openlock_Native_sign(JNIEnv *env,jclass type,jint kind,jbyteArray key,jbyteArray payload){
+    (void)type;uint8_t private_bytes[32],input[4096],out[4096];jsize count,private_len;size_t length=0;
+    if(!read(env,key,private_bytes,32,&private_len)||!read(env,payload,input,sizeof input,&count))return NULL;
+    if(private_len!=32){fail(env,-1);return NULL;}
+    int32_t code=openlock_sign((uint32_t)kind,private_bytes,input,(size_t)count,out,sizeof out,&length);
+    volatile uint8_t *wipe=private_bytes;for(size_t i=0;i<32;i++)wipe[i]=0;
+    return result(env,code,out,length);
 }

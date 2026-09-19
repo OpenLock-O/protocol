@@ -17,3 +17,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 rand_core.workspace = true
+openlock-protocol.workspace = true
+
+openlock-transport.workspace = true
+openlock-transport-ble.workspace = true
+openlock-transport-nfc.workspace = true

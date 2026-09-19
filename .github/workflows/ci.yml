@@ -67,17 +67,8 @@ jobs:
         shell: bash
         run: nix profile add nixpkgs#devenv
 
-      - name: Build Swift package
-        shell: devenv shell bash -- -e {0}
-        run: cd bindings/swift && swift build
+      - name: Fetch Rust dependencies
+        run: devenv shell -- sh -c 'CARGO_NET_OFFLINE=false cargo fetch'
 
-      - name: Build Kotlin package
-        shell: devenv shell bash -- -e {0}
-        run: cd bindings/kotlin && gradle --no-daemon --console=plain build
-
-      - name: Check JNI shim
-        shell: devenv shell bash -- -e {0}
-        run: |
-          ndk_root="${ANDROID_NDK_HOME:-$ANDROID_NDK_ROOT}"
-          jni_include="$(dirname "$(find -L "$ndk_root" -name jni.h -print -quit)")"
-          clang -fsyntax-only -I"$jni_include" -Iinclude bindings/kotlin/src/main/cpp/openlock_jni.c
+      - name: Run C, Swift and Kotlin lifecycle integration
+        run: devenv shell -- scripts/check-bindings.sh

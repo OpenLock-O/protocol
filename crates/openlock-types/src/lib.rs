@@ -6,15 +6,30 @@ extern crate alloc;
 use alloc::{collections::BTreeSet, vec::Vec};
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION: u64 = 2;
+pub const PROTOCOL_VERSION: u64 = 4;
+/// Signed grants and policies retain their v2 encoding and domains.
+pub const CREDENTIAL_VERSION: u64 = 2;
 pub const MAX_OBJECT_SIZE: usize = 4096;
 pub const MAX_MESSAGE_SIZE: usize = 4096;
 pub const RIGHTS_UNLOCK: u32 = 1;
 pub const RIGHTS_STATUS: u32 = 2;
+pub const RIGHTS_LOCK: u32 = 4;
+pub const RIGHTS_LOG: u32 = 8;
+pub const RIGHTS_CONFIG: u32 = 16;
+pub const RIGHTS_CREDENTIALS: u32 = 32;
+pub const RIGHTS_CLOCK: u32 = 64;
+pub const RIGHTS_REBOOT: u32 = 128;
+pub const RIGHTS_FIRMWARE: u32 = 256;
+pub const RIGHTS_RESET: u32 = 512;
+pub const RIGHTS_TRUST: u32 = 1024;
+pub const KNOWN_RIGHTS: u32 = 2047;
+// Capability bits identify command opcodes. They never confer authorization.
 pub const CAP_UNLOCK: u64 = 1;
 pub const CAP_STATUS: u64 = 2;
 pub const CAP_POLICY: u64 = 4;
-pub const KNOWN_CAPABILITIES: u64 = CAP_UNLOCK | CAP_STATUS | CAP_POLICY;
+pub const KNOWN_CAPABILITIES: u64 = (1 << 23) - 1;
+pub mod device;
+pub use device::*;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LockId(pub [u8; 16]);
@@ -68,35 +83,6 @@ pub enum Authorization {
 pub enum Decision {
     Authorized(Authorization),
     AlreadyConsumed { next_use: u32 },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AccessRequest {
-    pub credential: Vec<u8>,
-    pub requested_use: Option<u32>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Command {
-    Unlock(AccessRequest),
-    Status(AccessRequest),
-    ApplyPolicy(Vec<u8>),
-}
-impl Command {
-    pub fn capability(&self) -> u64 {
-        match self {
-            Self::Unlock(_) => CAP_UNLOCK,
-            Self::Status(_) => CAP_STATUS,
-            Self::ApplyPolicy(_) => CAP_POLICY,
-        }
-    }
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Response {
-    Unlocked,
-    Status { epoch: u64, policy_version: u64 },
-    PolicyApplied,
-    AlreadyConsumed { next_use: u32 },
-    Rejected { code: u32 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,9 +158,55 @@ pub enum Error {
     ActuatorFailed,
     #[error("invalid NFC record")]
     InvalidNfc,
+    #[error("Busy")]
+    Busy,
+    #[error("DoorOpen")]
+    DoorOpen,
+    #[error("PrivacyActive")]
+    PrivacyActive,
+    #[error("Jammed")]
+    Jammed,
+    #[error("ActionTimeout")]
+    ActionTimeout,
+    #[error("SensorConflict")]
+    SensorConflict,
+    #[error("InvalidConfig")]
+    InvalidConfig,
+    #[error("Conflict")]
+    Conflict,
+    #[error("ResultUnavailable")]
+    ResultUnavailable,
+    #[error("NotProvisioned")]
+    NotProvisioned,
+    #[error("AlreadyProvisioned")]
+    AlreadyProvisioned,
+    #[error("PairingClosed")]
+    PairingClosed,
+    #[error("InvalidSetupKey")]
+    InvalidSetupKey,
+    #[error("PhysicalConfirmationRequired")]
+    PhysicalConfirmationRequired,
+    #[error("ClockRollback")]
+    ClockRollback,
+    #[error("FirmwareInvalid")]
+    FirmwareInvalid,
+    #[error("FirmwareTargetMismatch")]
+    FirmwareTargetMismatch,
+    #[error("FirmwareRollback")]
+    FirmwareRollback,
+    #[error("FirmwareConflict")]
+    FirmwareConflict,
+    #[error("FirmwareIncomplete")]
+    FirmwareIncomplete,
+    #[error("PowerInsufficient")]
+    PowerInsufficient,
+    #[error("BootFailed")]
+    BootFailed,
+    #[error("ResourceExhausted")]
+    ResourceExhausted,
 }
 impl Error {
-    /// Stable, positive encrypted-session wire/FFI error codes.
+    /// Stable, positive v2 wire/FFI error codes.
     pub fn code(&self) -> u32 {
         match self {
             Self::ObjectTooLarge => 1,
@@ -199,6 +231,29 @@ impl Error {
             Self::StaleKey => 20,
             Self::ActuatorFailed => 21,
             Self::InvalidNfc => 22,
+            Self::Busy => 32,
+            Self::DoorOpen => 33,
+            Self::PrivacyActive => 34,
+            Self::Jammed => 35,
+            Self::ActionTimeout => 36,
+            Self::SensorConflict => 37,
+            Self::InvalidConfig => 38,
+            Self::Conflict => 39,
+            Self::ResultUnavailable => 40,
+            Self::NotProvisioned => 41,
+            Self::AlreadyProvisioned => 42,
+            Self::PairingClosed => 43,
+            Self::InvalidSetupKey => 44,
+            Self::PhysicalConfirmationRequired => 45,
+            Self::ClockRollback => 46,
+            Self::FirmwareInvalid => 47,
+            Self::FirmwareTargetMismatch => 48,
+            Self::FirmwareRollback => 49,
+            Self::FirmwareConflict => 50,
+            Self::FirmwareIncomplete => 51,
+            Self::PowerInsufficient => 52,
+            Self::BootFailed => 53,
+            Self::ResourceExhausted => 54,
         }
     }
 }

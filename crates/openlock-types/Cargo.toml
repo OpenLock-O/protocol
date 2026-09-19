@@ -11,3 +11,5 @@ std = ["thiserror/std"]
 
 [dependencies]
 thiserror.workspace = true
+
+zeroize.workspace = true

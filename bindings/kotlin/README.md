@@ -1,42 +1,41 @@
-# OpenLock Kotlin binding
+# OpenLock Kotlin/JNI
 
-The Kotlin binding provides encrypted-session and TOTP authentication through
-the same native library. Choose the mode through trusted application/device
-configuration; a failed session must not trigger automatic fallback to TOTP.
-
-Use `OpenLockSession` to own an encrypted-session handle:
+`OpenLockSession` implements the v4 encrypted protocol. Use `LockAction` for all
+physical and management commands, and inspect typed `SessionEvent.Response` and
+`LockReply` values. `Reading.Unsupported` and `Reading.Unknown` are distinct;
+`OperationPhase.RUNNING` is not proof of physical unlocking.
 
 ```kotlin
-OpenLockSession.initiator(privateKey, lockPublicKey, capabilities).use { session ->
-    // Platform BLE/NFC I/O remains application-owned.
+OpenLockSession.initiator(holderPrivateKey, trustedLockPublicKey).use { session ->
+    // Exchange session.start() and session.receive(...) handshake packets.
+    val request = session.send(LockAction.Unlock, grant, nextSequence)
+    // Platform BLE/NFC transports request.packet; receive returns the full result.
 }
 ```
 
-Use `OpenLock` to generate and parse complete TOTP messages:
+Use `SetupPayload(qrText)` to read secret factory initialization credentials.
+After a physical pairing gesture, query `LockAction.PairingStatus`, issue the
+initial grant with `OpenLockIssuer.issue`, then send `LockAction.claim`. Reconnect
+following successful claim or any ownership/device identity change. Keep the
+operation sequence in persistent application state, independent of the session.
 
-```kotlin
-val request = OpenLock.makeUnlock(secret, credentialId = 7L, unixSeconds = now)
-// Send the 18 bytes through the configured TOTP BLE/NFC endpoint.
-val result = OpenLock.decodeResponse(receivedBytes)
+`OpenLockIssuer` provides Ed25519 public keys, grant issuance, revocation policies
+and firmware manifests. `signDeviceKey` and `signRotation` prepare device trust
+updates. Hardware keys and firmware verification roots are provisioned separately.
+Application code owns Android Keystore integration and copies of secret arrays.
+
+Build under the repository Devenv shell. Its `JDK17_HOME` is registered in
+`gradle.properties`, so Gradle selects JDK 17 even when another JDK starts Gradle.
+
+```sh
+devenv shell -- scripts/check-bindings.sh
 ```
 
-For TOTP, provision a unique 32-byte key per lock/credential through a trusted
-local path. `encodeUnlock(credentialId, timeStep, code)` also encodes a code
-received out of band. IDs are `1..0xffffffff`, timestamps/steps are nonnegative,
-and codes are `0..99_999_999`. A result is unauthenticated; correlate its ID/step
-but do not treat it as proof of physical opening. Code 24 rejects a consumed or
-superseded step. Consumption survives failed actuation, reconnection and reboot.
+This builds and runs desktop JNI integration against the Rust device simulator.
+For Android, compile `openlock-ffi` for each Android ABI and pass the directory
+containing that library to CMake as `OPENLOCK_LIBRARY_DIR`. Package both
+`libopenlock_jni.so` and `libopenlock_ffi.so`. Desktop CMake locates JNI headers
+with `find_package(JNI)`; Android uses NDK headers.
 
-Run `gradle --no-daemon --console=plain build` to build the JVM package. Build
-Rust `openlock-ffi` with its default `secure,totp` features for each Android ABI,
-make the library available to the Android linker, and build the JNI shim in
-`src/main/cpp`. Package both `libopenlock_jni.so` and `libopenlock_ffi.so`.
-Both entry points load `openlock_jni`, which exports the two method sets and
-links Rust. The header path points to the canonical `include/openlock.h`.
-
-BLE/NFC callbacks, key storage and authentication mode selection belong to the
-application. Lock firmware must enforce the mode's authorization and persistence
-contract; packet decoding is not authorization. See the
-[protocol specification](../../docs/protocol.md),
-[TOTP contract](../../docs/protocol.md#totp) and
-[architecture guide](../../docs/architecture.md).
+See [protocol](../../docs/protocol.md) and [integration](../../docs/architecture.md)
+for permissions, wire formats, durable storage and physical confirmation contracts.

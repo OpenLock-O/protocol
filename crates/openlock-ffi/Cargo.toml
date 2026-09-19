@@ -8,13 +8,9 @@ rust-version.workspace = true
 [lib]
 crate-type = ["cdylib", "staticlib"]
 
-[features]
-default = ["secure", "totp"]
-secure = ["dep:openlock-core", "dep:openlock-protocol", "dep:openlock-types"]
-totp = ["dep:openlock-totp"]
-
 [dependencies]
-openlock-core = { workspace = true, features = ["std"], optional = true }
-openlock-protocol = { workspace = true, features = ["std"], optional = true }
-openlock-types = { workspace = true, features = ["std"], optional = true }
-openlock-totp = { workspace = true, features = ["std"], optional = true }
+openlock-core = { path = "../openlock-core", features = ["std"] }
+openlock-protocol = { workspace = true, features = ["std"] }
+openlock-types = { workspace = true, features = ["std"] }
+
+openlock-crypto = { workspace = true, features = ["std"] }

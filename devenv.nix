@@ -34,14 +34,13 @@
   languages.rust.components = [ "rustc" "cargo" "rustfmt" "clippy" ];
   languages.rust.targets = [ "thumbv7em-none-eabihf" ];
 
+  env.JDK17_HOME = "${pkgs.jdk17}";
   env.OPENLOCK_OFFLINE = "1";
   env.CARGO_NET_OFFLINE = "true";
 
   scripts.check.exec = ''
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
-    cargo check --locked -p openlock-ffi --no-default-features --features secure
-    cargo check --locked -p openlock-ffi --no-default-features --features totp
   '';
 
   scripts.unit-tests.exec = ''
@@ -67,9 +66,6 @@
       -p openlock-transport-nfc \
       --no-default-features \
       --target thumbv7em-none-eabihf
-    # The lightweight scheme compiles independently without Noise's RNG backend.
-    cargo check --locked --lib -p openlock-totp \
-      --no-default-features --target thumbv7em-none-eabihf
   '';
 
   enterShell = ''

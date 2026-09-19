@@ -1,84 +1,63 @@
 # OpenLock
 
-OpenLock is an offline BLE/NFC access protocol with two authentication modes:
-**encrypted sessions** and **plaintext TOTP**. Devices can enable either or both
-through trusted configuration according to their access policy and hardware
-requirements. The host supplies platform I/O, storage, clocks and actuation;
-OpenLock does not require a cloud service or vendor SDK.
+OpenLock is an offline, encrypted BLE/NFC lock protocol and reference implementation.
+It defines physical lock behavior, phone commissioning, authorization, device management
+and signed firmware delivery. Platform firmware supplies durable storage, clocks,
+sensors, actuators and a verifying bootloader; no cloud or vendor SDK is required.
 
-| | Encrypted sessions | TOTP |
-| --- | --- | --- |
-| Authentication | Noise IK, X25519, Ed25519/COSE grants | RFC 6238 HMAC-SHA-256, 30 seconds, eight digits |
-| Transport security | Authenticated, encrypted sessions | Plaintext bearer OTP; responses unauthenticated |
-| Operations | Unlock, Status, ApplyPolicy, device trust/rotation | Unlock; trusted local provisioning/management |
-| Authorization | Holder-bound grants, epochs, revocation, time/use limits | Per-lock/per-credential key, local validity/use limits |
-| Communication | Handshake, up to 4096-byte messages, bounded fragments | 18-byte request, 15-byte result, no application handshake/fragments |
-| Firmware runtime | `no_std + alloc`, RNG for ephemeral keys | `no_std`, no heap or runtime RNG |
-
-The [protocol specification](docs/protocol.md) defines shared access rules and
-the wire contract for each mode. The [architecture guide](docs/architecture.md)
-covers firmware integration, Rust modules, C ABI and mobile bindings.
-
-Authentication mode selection is explicit. A failed handshake or authorization
-check never permits automatic fallback to another mode. Credentials, revocation
-and use counters are scoped to their mode; management coordinates them when a
-user has both kinds of credential.
-
-TOTP verification consumes a step durably **before** actuation and rejects reuse
-across reconnects, transports and reboot. It also persists a lock-wide attempt
-budget. Provision its shared key through a trusted path. TOTP does not provide
-confidentiality, authenticated lock responses or protection against first-use
-interception/real-time relay. Battery life and brownout durability require
-measurements on the selected hardware.
-
-## Workspace and bindings
+The workspace is based on the `b564e0e` encrypted-protocol implementation. There is one
+Noise-encrypted authentication path. The current release is **0.4.0**, using
+**wire version 4 / profile 1**. Signed grants, policies and device trust objects
+retain their independent v2 formats and signature domains.
 
 | Component | Responsibility |
 | --- | --- |
-| `openlock-types` | Encrypted-session domain types and stable errors |
-| `openlock-crypto` | Noise IK, COSE/Ed25519 and device trust/rotation |
-| `openlock-protocol` | Encrypted-session envelope and `Session` state machine |
-| `openlock-core` | Signed-grant authorization, policy versions and durable use counters |
-| `openlock-transport`, `openlock-transport-ble`, `openlock-transport-nfc` | Encrypted-session framing, reassembly and signed NFC bootstrap |
-| `openlock-totp` | TOTP types, crypto, authorization, wire encoding, transports and local provisioning |
-| `openlock-issuer` | Signed grants, policies and device records; TOTP provisioning through its `totp` module |
-| `openlock-ffi` | C ABI for both authentication modes |
+| `openlock-types` | Commands, physical state, capabilities, permissions, results and stable errors |
+| `openlock-crypto` | Noise IK, COSE/Ed25519, signed firmware, device rotation, canonical CBOR and secret QR payloads |
+| `openlock-protocol` | Encrypted session, request correlation and bounded message encoding |
+| `openlock-core::device` | Serialized device controller, commissioning, durable operation deduplication, lock behavior, management and firmware state machines |
+| `openlock-transport`, BLE and NFC adapters | Bounded framing and signed NFC discovery |
+| `openlock-issuer` | Offline signing of access grants, revocation policies and device trust records |
+| `openlock-ffi` | Buffer-safe C session, event and signing APIs |
+| Swift / Kotlin | Typed commands, state, operation results, commissioning and administrator helpers |
 
-Firmware can depend only on the components it needs. A TOTP-only device uses
-`openlock-totp` with `default-features = false`, without introducing the
-session cryptography, CBOR, allocator or RNG dependencies.
+`Unlock` releases the locking mechanism; it does not assert that a door opened.
+Physical bolt state, door state, actuator progress and completion evidence are
+separate. Unsupported sensors and unknown readings are explicit. Only accepted
+unlock attempts consume unlock uses, durably before driving. Reconnects and
+reboots never restore a consumed use or replay an ambiguous operation.
 
-FFI enables `secure` and `totp` by default. A smaller host library can use
-`--no-default-features --features secure` or `--features totp`. Swift/Kotlin
-expose `OpenLockSession` for encrypted sessions and the stateless `OpenLock`
-helpers for TOTP. Consumers using both link the default combined FFI library.
+Read the [wire and behavior specification](docs/protocol.md) and the
+[platform integration guide](docs/architecture.md). They include command permissions,
+state transitions, storage contracts, migration and hardware validation requirements.
 
-Wire identifiers and cryptographic domain strings are defined in the
-[compatibility section](docs/protocol.md#wire-identifiers-and-compatibility).
-They are fixed encoding values, independent of the Cargo workspace release.
-Existing clients and credentials continue to use their configured mode.
-
-## Development
-
-The project uses [Devenv](https://devenv.sh/) and Direnv:
+## Development and verification
 
 ```sh
 direnv allow
-devenv shell
-# Once for an empty dependency cache:
-CARGO_NET_OFFLINE=false cargo fetch
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --locked
-cargo build --workspace --all-targets --locked
+# For an empty Rust dependency cache:
+devenv shell -- sh -c 'CARGO_NET_OFFLINE=false cargo fetch'
+devenv shell -- check
+devenv shell -- cargo test --workspace --locked
+devenv shell -- cargo build --workspace --all-targets --locked
 devenv shell -- no-std-check
+devenv shell -- scripts/check-bindings.sh
 ```
 
-The shell pins tools through `devenv.lock`, defaults Cargo to offline mode, and
-provides Rust, Kotlin, Gradle, JDK 17, Swift, CMake, Ninja and Android SDK/NDK
-support. `local.properties` is generated and machine-local.
+The last command builds a Rust simulated device and drives its complete lifecycle
+from **native C, Swift, and Kotlin/JNI**, including actual Noise sessions. It checks
+binding, unlock/lock, state, configuration, logs, signed upgrade, revocation,
+clock maintenance and factory reset. Swift/Kotlin additionally exercise device-key
+rotation and reconnection using the new key. Test keys are deterministic and must
+never be used in a device.
 
-`no-std-check` tests both modes without default features, then compiles the
-session libraries for `thumbv7em-none-eabihf` with the custom RNG backend setting
-and compiles TOTP independently without that setting. These are library checks,
-not linked/running firmware images. See [integration](docs/architecture.md).
+The runtime crates support `no_std + alloc`; the embedded compile target is
+`thumbv7em-none-eabihf`. Issuer, FFI and the executable simulator are host tools.
+The Devenv environment includes Rust, Swift, Kotlin, Gradle, JDK 17, CMake and JNI
+headers. `JDK17_HOME` explicitly selects the declared Java toolchain for Gradle.
+The Swift integration runner is an executable, so it does not require XCTest.
+
+The implementation does not include board-specific drivers, a phone UI, flash
+partitioning or a production bootloader. The reference tests simulate these
+interfaces; actuator safety, brownout durability and boot recovery must also be
+verified on the selected hardware.
